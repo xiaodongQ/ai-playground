@@ -7,9 +7,10 @@
 ## 🔰 新手从这里开始
 
 1. **先读** → [README.md](./README.md) - 使用指南与核心理念
-2. **再学** → [frameworks/core-frameworks.md](./frameworks/core-frameworks.md) - 主流框架
-3. **速查** → [quick-reference/checklist.md](./quick-reference/checklist.md) - 提问检查清单
-4. **常用** → [quick-reference/one-liners.md](./quick-reference/one-liners.md) - 万能句式
+2. **再看** → [examples/before-after.md](./examples/before-after.md) - 效果对比（感受差异）
+3. **再学** → [frameworks/core-frameworks.md](./frameworks/core-frameworks.md) - 主流框架
+4. **速查** → [quick-reference/cheat-sheet.md](./quick-reference/cheat-sheet.md) - 一页纸速查卡
+5. **练习** → [practice/exercises.md](./practice/exercises.md) - 刻意练习
 
 ---
 
@@ -59,10 +60,26 @@
 
 ---
 
+## 📖 案例与练习
+
+### 效果对比
+[examples/before-after.md](./examples/before-after.md) - 看差提示词 vs 好提示词的实际差异
+
+### 完整案例
+[examples/case-studies.md](./examples/case-studies.md) - 真实场景的完整对话记录
+
+### 刻意练习
+[practice/exercises.md](./practice/exercises.md) - 3 个级别 10+ 练习题（含答案）
+
+### 个人模板
+[personal/my-templates.md](./personal/my-templates.md) - 记录你的最佳实践
+
+---
+
 ## 🧠 按框架查找
 
 ### 基础框架
-[fameworks/core-frameworks.md](./frameworks/core-frameworks.md)
+[frameworks/core-frameworks.md](./frameworks/core-frameworks.md)
 - CO-STAR (推荐首选)
 - CRISPE (创意类)
 - BROKE (有约束)
@@ -84,7 +101,21 @@
 
 ---
 
+## 🚀 高级专题
+
+### 工作流设计
+[advanced/workflow-design.md](./advanced/workflow-design.md)
+- 复杂任务拆解
+- 多轮对话编排
+- 状态管理
+- 实战案例
+
+---
+
 ## ⚡ 快速参考
+
+### 一页纸速查卡
+[quick-reference/cheat-sheet.md](./quick-reference/cheat-sheet.md) - **打印贴桌边**
 
 ### 检查清单
 [quick-reference/checklist.md](./quick-reference/checklist.md)
@@ -117,6 +148,11 @@
 | 让 AI 准备会议 | productivity.md → 会议效率 |
 | 让 AI 帮我沟通 | communication.md → 困难对话 |
 | 不知道咋问 | checklist.md → 核心五问 |
+| 看好坏对比 | examples/before-after.md |
+| 看完整案例 | examples/case-studies.md |
+| 做练习题 | practice/exercises.md |
+| 打印速查卡 | quick-reference/cheat-sheet.md |
+| 设计复杂流程 | advanced/workflow-design.md |
 
 ---
 

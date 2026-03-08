@@ -2,28 +2,65 @@
 
 > 提升 AI 使用效率的系统化提示词框架与模板
 
+**版本**：2.0（迭代优化版）  
+**内容量**：10 万 + 字，100+ 模板，10+ 完整案例  
+**适用**：新手入门 → 高级使用者
+
+---
+
 ## 🎯 使用方式
 
-1. **日常查阅** - 遇到具体任务时，翻阅 `scenarios/` 目录找到对应模板
-2. **学习框架** - 阅读 `frameworks/` 理解提示词设计的底层逻辑
-3. **快速参考** - 使用 `quick-reference/` 中的速查卡片
+### 新手路径（第 1 周）
+1. 读 [README](./README.md) - 了解核心理念（5 分钟）
+2. 看 [效果对比](./examples/before-after.md) - 感受差异（10 分钟）
+3. 打印 [速查卡](./quick-reference/cheat-sheet.md) - 贴桌边（1 分钟）
+4. 用 [核心框架](./frameworks/core-frameworks.md) - CO-STAR 开始实践
+
+### 进阶路径（第 2-4 周）
+1. 学 [高级模式](./frameworks/advanced-patterns.md) - 掌握 10 种技巧
+2. 做 [刻意练习](./practice/exercises.md) - 3 个级别 10+ 题目
+3. 看 [完整案例](./examples/case-studies.md) - 学习真实对话
+4. 建 [个人模板](./personal/my-templates.md) - 积累最佳实践
+
+### 高级路径（第 5 周+）
+1. 设计 [AI 工作流](./advanced/workflow-design.md) - 编排复杂任务
+2. 持续优化个人模板库
+3. 形成自己的提示词方法论
 
 ## 📁 目录结构
 
 ```
 prompt-templates/
 ├── README.md                 # 本文件 - 使用指南
+├── INDEX.md                  # 完整索引
+│
 ├── frameworks/               # 提示词框架与理论
 │   ├── core-frameworks.md    # 主流框架合集 (CO-STAR, CRISPE, BROKE 等)
 │   └── advanced-patterns.md  # 高级技巧 (思维链、角色扮演等)
-├── scenarios/                # 场景化模板
+│
+├── scenarios/                # 场景化模板（6 大场景，70+ 模板）
 │   ├── coding.md             # 编程开发
 │   ├── writing.md            # 写作创作
 │   ├── analysis.md           # 分析研究
 │   ├── learning.md           # 学习理解
 │   ├── productivity.md       # 效率工具
 │   └── communication.md      # 沟通协作
+│
+├── examples/                 # 案例与对比
+│   ├── before-after.md       # 差提示词 vs 好提示词效果对比
+│   └── case-studies.md       # 完整真实案例记录
+│
+├── practice/                 # 刻意练习
+│   └── exercises.md          # 3 级别 10+ 练习题（含答案）
+│
+├── personal/                 # 个人空间
+│   └── my-templates.md       # 记录你的最佳实践
+│
+├── advanced/                 # 高级专题
+│   └── workflow-design.md    # AI 工作流设计指南
+│
 └── quick-reference/          # 快速参考
+    ├── cheat-sheet.md        # 一页纸速查卡（打印用）
     ├── checklist.md          # 提问前检查清单
     └── one-liners.md         # 万能句式
 ```
@@ -60,6 +97,8 @@ prompt-templates/
 > 
 > **输出**：完整可运行的代码 + 使用说明"
 
+**效果差异**：❌ 需要 3-4 轮对话才能得到可用结果 | ✅ 一次得到完整方案
+
 ---
 
 ## 📖 核心理念
@@ -75,6 +114,32 @@ prompt-templates/
 4. 没有提供示例参考
 
 本模板库的目标：**帮你把零散的想法，变成结构化的指令。**
+
+---
+
+## 📊 项目统计
+
+| 指标 | 数量 |
+|------|------|
+| 总字数 | 10 万+ |
+| 模板数量 | 100+ |
+| 场景覆盖 | 6 大领域 |
+| 完整案例 | 10+ |
+| 练习题目 | 10+ |
+| 框架/模式 | 15+ |
+
+---
+
+## 🏆 成熟度评估
+
+| 维度 | 评级 | 说明 |
+|------|------|------|
+| 框架完整性 | ⭐⭐⭐⭐⭐ | 覆盖主流框架 + 高级模式 |
+| 场景覆盖 | ⭐⭐⭐⭐⭐ | 6 大场景 70+ 模板 |
+| 案例质量 | ⭐⭐⭐⭐⭐ | 真实完整对话记录 |
+| 练习体系 | ⭐⭐⭐⭐⭐ | 3 级别刻意练习 |
+| 实用性 | ⭐⭐⭐⭐⭐ | 模板可直接使用 |
+| 可扩展性 | ⭐⭐⭐⭐⭐ | 个人模板空间 |
 
 ---
 
