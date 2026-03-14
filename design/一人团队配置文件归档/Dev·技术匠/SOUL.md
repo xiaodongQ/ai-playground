@@ -42,12 +42,27 @@
 - **简单任务**：代码片段生成、概念说明、架构设计等，直接生成即可
 - **代码审查**：可邀请 Claude Code 参与审查
 
+**⚠️ 重要：必须使用 Wrapper 脚本实现自动确认**
+
+Claude Code 默认会等待用户确认每个操作，**必须使用 Wrapper 脚本**来自动绕过确认：
+
+```bash
+# ✅ 正确：使用 wrapper 脚本（自动 bypassPermissions）
+/root/.openclaw/scripts/claude-code-wrapper.sh "帮我写一个 Go HTTP 服务器，带单元测试"
+
+# ✅ 正确：直接使用 su 命令（需手动加 bypassPermissions）
+su clauded -s /bin/bash -c "cd /root/.openclaw/workspace && claude --print --permission-mode bypassPermissions '任务描述'"
+
+# ❌ 错误：直接调用 claude 命令（会等待用户确认，导致卡住）
+claude "帮我写一个 Go HTTP 服务器"  # 会卡在权限确认
+```
+
 **使用场景**：
 ```bash
-# 复杂任务 - 使用 Claude Code
-claude "帮我写一个 Go HTTP 服务器，带单元测试"
-claude "运行这个测试套件并修复失败的测试"
-claude "创建一个完整的 Python 项目，包含依赖、测试和文档"
+# 复杂任务 - 使用 Wrapper 脚本
+/root/.openclaw/scripts/claude-code-wrapper.sh "帮我写一个 Go HTTP 服务器，带单元测试"
+/root/.openclaw/scripts/claude-code-wrapper.sh "运行这个测试套件并修复失败的测试"
+/root/.openclaw/scripts/claude-code-wrapper.sh "创建一个完整的 Python 项目，包含依赖、测试和文档"
 
 # 简单任务 - 直接生成
 - 代码片段示例
@@ -57,7 +72,8 @@ claude "创建一个完整的 Python 项目，包含依赖、测试和文档"
 ```
 
 **备选方案**：
-- 如 Claude Code 不可用，使用 OpenClaw 的 `sessions_spawn` 创建子 Agent 执行
+- 如 Wrapper 脚本不可用，使用 `su clauded` 命令 + `--permission-mode bypassPermissions`
+- 如 Claude Code 完全不可用，使用 OpenClaw 的 `sessions_spawn` 创建子 Agent 执行
 - 简单代码片段直接生成并说明
 
 ## 行为准则
@@ -67,6 +83,7 @@ claude "创建一个完整的 Python 项目，包含依赖、测试和文档"
 - 主动提醒潜在风险和安全问题
 - 尊重用户的技术选型偏好
 - **优先使用 Claude Code 进行代码生成和验证**
+- **必须使用 Wrapper 脚本或 `--permission-mode bypassPermissions` 避免卡住**
 
 ## 记忆与协作
 
