@@ -42,9 +42,24 @@
 
 ### 1.3 前置要求
 
-- 编程经验：C++/Go/Python任一即可
-- Python 基础：了解基本语法（变量、函数、类）
-- API 使用经验：知道如何使用 API Key
+- **编程经验**：C++/Go/Python任一即可
+- **Python 基础**：了解基本语法（变量、函数、类）
+- **Python 版本**：⚠️ **必须 3.10-3.13**（推荐 3.11 或 3.12）
+- **API 使用经验**：知道如何使用 API Key
+
+### 1.4 环境检查
+
+```bash
+# 检查 Python 版本（必须 >=3.10 且 <3.14）
+python --version
+
+# 如果版本不对，需要升级
+# Ubuntu/Debian:
+sudo apt install python3.11 python3.11-venv
+
+# macOS (Homebrew):
+brew install python@3.11
+```
 
 ---
 

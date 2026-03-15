@@ -168,11 +168,25 @@ reporting_task:
 
 ### 2.1 安装（2026 年 3 月更新）
 
+#### 环境要求
+
+| 组件 | 版本要求 | 推荐 |
+|------|---------|------|
+| **Python** | **>=3.10, <3.14** | **3.11 或 3.12** |
+| pip | >=21.0 | 24.0+ |
+
+```bash
+# 检查 Python 版本
+python --version  # 必须 3.10-3.13
+```
+
+#### 安装命令
+
 ```bash
 # ✅ 官方推荐方式（包含 tools）
 pip install "crewai[tools]"
 
-# 或使用 uv
+# 或使用 uv（更快）
 uv add "crewai[tools]"
 
 # 或只安装核心包（不含 tools）

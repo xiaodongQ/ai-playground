@@ -26,6 +26,26 @@ crewai-langchain-demos/
 
 ## 🎯 学习路径
 
+### 阶段 0：环境准备（5 分钟）⚠️
+
+**Python 版本要求：>=3.10 且 <3.14**（推荐 3.11 或 3.12）
+
+```bash
+# 检查 Python 版本
+python --version  # 必须 3.10-3.13
+
+# 如果版本不对，需要升级
+# Ubuntu/Debian:
+sudo apt install python3.11 python3.11-venv
+
+# macOS (Homebrew):
+brew install python@3.11
+
+# 创建虚拟环境（推荐）
+python3.11 -m venv crewai-env
+source crewai-env/bin/activate  # Linux/macOS
+```
+
 ### 阶段 1：快速入门（30 分钟）
 
 1. **阅读框架调研**（10 分钟）
@@ -39,17 +59,17 @@ crewai-langchain-demos/
    cat docs/offline-development-guide.md
    
    # 方案一：在有网环境下载依赖
-   pip download -r requirements.txt -d packages/
+   pip download "crewai[tools]" -d packages/
    
    # 方案二：在离线环境安装
-   pip install --no-index --find-links=packages/ -r requirements.txt
+   pip install --no-index --find-links=packages/ "crewai[tools]"
    ```
 
 3. **运行基础 Demo**（20 分钟）
    ```bash
    # CrewAI 基础
    cd demos/crewai-basic
-   pip install -r requirements.txt
+   pip install -r requirements.txt  # 会自动安装 crewai[tools]
    python main.py
    
    # LangChain 基础
