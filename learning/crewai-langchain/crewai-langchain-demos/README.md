@@ -11,7 +11,8 @@
 crewai-langchain-demos/
 ├── README.md                    # 本文件
 ├── docs/                        # 文档
-│   └── crewai-langchain-research.md  # 框架调研报告
+│   ├── crewai-langchain-research.md      # 框架调研报告
+│   └── offline-development-guide.md      # 🔥 离线开发指南（新增）
 ├── demos/                       # Demo 代码
 │   ├── crewai-basic/            # CrewAI 基础 Demo
 │   ├── crewai-advanced/         # CrewAI 进阶 Demo
@@ -32,7 +33,19 @@ crewai-langchain-demos/
    cat docs/crewai-langchain-research.md
    ```
 
-2. **运行基础 Demo**（20 分钟）
+2. **离线环境准备**（如需要，5 分钟） 🔥
+   ```bash
+   # 查看离线开发指南
+   cat docs/offline-development-guide.md
+   
+   # 方案一：在有网环境下载依赖
+   pip download -r requirements.txt -d packages/
+   
+   # 方案二：在离线环境安装
+   pip install --no-index --find-links=packages/ -r requirements.txt
+   ```
+
+3. **运行基础 Demo**（20 分钟）
    ```bash
    # CrewAI 基础
    cd demos/crewai-basic

@@ -13,7 +13,8 @@
 3. [LangChain 核心概念](#3-langchain-核心概念)
 4. [LangChain 快速入门](#4-langchain-快速入门)
 5. [框架对比与选择建议](#5-框架对比与选择建议)
-6. [学习资源链接](#6-学习资源链接)
+6. [离线开发指南](#6-离线开发指南) 🔥
+7. [学习资源链接](#7-学习资源链接)
 
 ---
 
@@ -731,6 +732,53 @@ response = agent.invoke(
 
 print(response)
 ```
+
+---
+
+---
+
+## 6. 离线开发指南 🔥
+
+> 💡 **新增**: 针对网络受限环境的离线开发方案
+
+### 快速链接
+
+- **[离线开发完整指南](./offline-development-guide.md)** - 包含 3 种离线安装方案
+
+### 核心内容
+
+| 方案 | 适用场景 | 难度 |
+|------|---------|------|
+| 方案一：有网环境下载依赖包 | 可以临时联网 | ⭐ |
+| 方案二：本地镜像源 | 多台机器离线开发 | ⭐⭐⭐ |
+| 方案三：手动下载离线包 | 完全离线 | ⭐⭐ |
+
+### 快速命令参考
+
+```bash
+# 方案一：下载离线包
+pip download -r requirements.txt -d packages/
+
+# 方案二：使用本地源
+pip install --no-index --find-links=packages/ -r requirements.txt
+
+# 验证安装
+python -c "import crewai; print(crewai.__version__)"
+```
+
+---
+
+## 7. 学习资源链接
+
+### CrewAI 官方资源
+- **GitHub**: https://github.com/joaomdmoura/crewAI
+- **文档**: https://docs.crewai.com
+- **PyPI**: https://pypi.org/project/crewai
+
+### LangChain 官方资源
+- **GitHub**: https://github.com/langchain-ai/langchain
+- **文档**: https://python.langchain.com
+- **PyPI**: https://pypi.org/project/langchain
 
 ---
 
