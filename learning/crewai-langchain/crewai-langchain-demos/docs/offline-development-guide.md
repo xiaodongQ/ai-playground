@@ -2,219 +2,167 @@
 
 > 📡 **离线开发专用**  
 > 适用场景：无法直接访问 PyPI 或网络受限的开发环境  
-> ⚠️ **最后更新**: 2026-03-15（已核实最新版本）
+> ⚠️ **最后更新**: 2026-03-15（已核实正确安装方式）
 
 ---
 
-## ⚠️ 重要更新说明（2026-03-15）
+## ⚠️ 重要更新说明（2026-03-15 23:00）
 
-### 包名和版本变更
+### 正确的安装方式
+
+**crewai-tools 已经合并到 crewai 主包中！**
+
+```bash
+# ✅ 正确的安装方式（2026 年）
+pip install "crewai[tools]"
+
+# 或分开安装（也支持）
+pip install crewai crewai-tools
+```
+
+### 版本信息
 
 | 包名 | 最新版本 | 说明 |
 |------|---------|------|
-| `crewai` | `0.5.0` | ✅ 正常发布 |
-| `crewai-tools` | `1.10.1` | ✅ **存在**，但需要正确的 pip 版本 |
+| `crewai` | `0.5.0` | ✅ 主包 |
+| `crewai[tools]` | 包含 tools | ✅ **推荐** |
+| `crewai-tools` | `1.10.1` | ⚠️ 独立包（可选） |
 
-### 安装失败原因排查
+### 为什么推荐 `crewai[tools]`？
 
-如果你遇到 `ERROR: No matching distribution found crewai-tools`：
-
-```bash
-# 1. 检查 Python 版本（需要 3.10+）
-python --version
-
-# 2. 升级 pip（必须 21.0+）
-python -m pip install --upgrade pip
-
-# 3. 检查平台兼容性
-pip --version
-
-# 4. 尝试指定版本安装
-pip install crewai-tools==1.10.1
-
-# 5. 如果仍然失败，可能是平台 wheel 不可用，使用源码安装
-pip install crewai-tools --no-binary :all:
-```
+1. **官方推荐** - crewAI 官方文档推荐的安装方式
+2. **依赖管理** - 自动安装所有必要的工具依赖
+3. **版本兼容** - 确保 crewai 和 tools 版本匹配
+4. **简化安装** - 一条命令搞定
 
 ---
 
 ## 目录
 
-1. [离线开发准备](#1-离线开发准备)
-2. [方案一：在有网环境下载依赖包](#2-方案一在有网环境下载依赖包)
-3. [方案二：使用本地镜像源](#3-方案二使用本地镜像源)
-4. [方案三：手动下载离线安装包](#4-方案三手动下载离线安装包)
-5. [CrewAI 离线 Demo 运行](#5-crewai 离线 demo 运行)
-6. [常见问题](#6-常见问题)
+1. [快速安装](#1-快速安装)
+2. [离线开发方案](#2-离线开发方案)
+3. [验证安装](#3-验证安装)
+4. [常见问题](#4-常见问题)
 
 ---
 
-## 1. 离线开发准备
+## 1. 快速安装
 
-### 1.1 环境要求
+### 1.1 在线安装（推荐）
+
+```bash
+# 方式一：安装 crewai + tools（推荐）
+pip install "crewai[tools]"
+
+# 方式二：只安装 crewai 核心（不含 tools）
+pip install crewai
+
+# 方式三：分开安装
+pip install crewai crewai-tools
+```
+
+### 1.2 环境要求
 
 | 组件 | 最低版本 | 推荐版本 |
 |------|---------|---------|
 | Python | 3.10 | 3.11+ |
 | pip | 21.0 | 24.0+ |
-| git | 2.30 | 2.40+ |
-
-### 1.2 检查 Python 环境
 
 ```bash
-# 检查 Python 版本
-python --version
-# 或
-python3 --version
+# 检查环境
+python --version  # 需要 3.10+
+pip --version     # 需要 21.0+
 
-# 检查 pip 版本
-pip --version
-
-# 升级 pip（推荐）
+# 升级 pip
 python -m pip install --upgrade pip
 ```
 
 ---
 
-## 2. 方案一：在有网环境下载依赖包
+## 2. 离线开发方案
 
-### 2.1 创建依赖列表文件（2026 年 3 月更新）
+### 2.1 方案一：在有网环境下载依赖包
 
 ```bash
-# 创建项目目录
-mkdir crewai-offline-demo
-cd crewai-offline-demo
-
-# 创建 requirements.txt（使用最新兼容版本）
+# 创建 requirements.txt
 cat > requirements.txt << EOF
-crewai==0.5.0
-crewai-tools>=1.8.0
+crewai[tools]>=0.5.0
 python-dotenv>=1.0.0
-pydantic>=2.0.0
 EOF
-```
 
-### 2.2 下载离线包
-
-```bash
-# 创建下载目录
-mkdir packages
-
-# 下载所有依赖包（包括依赖的依赖）
-pip download -r requirements.txt -d packages/
-
-# 验证下载结果
-ls -lh packages/ | wc -l
-# 应该看到 50+ 个 .whl 文件
-```
-
-### 2.3 打包离线包
-
-```bash
-# 压缩离线包
-tar -czf crewai-offline-packages.tar.gz packages/
+# 下载所有依赖（包括 tools）
+pip download "crewai[tools]" -d packages/
 
 # 传输到离线环境
-scp crewai-offline-packages.tar.gz user@offline-server:/path/to/
-```
+scp -r packages/ user@offline-server:/path/to/
 
-### 2.4 在离线环境安装
-
-```bash
-# 解压离线包
-tar -xzf crewai-offline-packages.tar.gz
-
-# 离线安装
+# 在离线环境安装
 pip install --no-index --find-links=packages/ -r requirements.txt
 ```
 
----
-
-## 3. 方案二：使用本地镜像源
-
-### 3.1 搭建本地 PyPI 镜像（可选）
+### 2.2 方案二：手动下载离线包
 
 ```bash
-# 使用 pip2pi 工具
-pip install pip2pi
+# 在有网环境下载
+pip download "crewai[tools]==0.5.0" -d packages/
 
-# 创建镜像目录
-mkdir -p /opt/pypi-mirror
+# 打包
+tar -czf crewai-offline.tar.gz packages/
 
-# 下载依赖到镜像目录
-pip2pi /opt/pypi-mirror/ crewai crewai-tools
-
-# 启动简易 HTTP 服务器
-cd /opt/pypi-mirror
-python -m http.server 8080
-```
-
-### 3.2 配置 pip 使用本地源
-
-```bash
-# 创建 pip 配置文件
-mkdir -p ~/.pip
-cat > ~/.pip/pip.conf << EOF
-[global]
-index-url = http://localhost:8080/simple
-trusted-host = localhost
-EOF
+# 在离线环境解压安装
+tar -xzf crewai-offline.tar.gz
+pip install --no-index --find-links=packages/ crewai
 ```
 
 ---
 
-## 4. 方案三：手动下载离线安装包
+## 3. 验证安装
 
-### 4.1 核心依赖列表（2026 年 3 月）
-
-```
-crewai==0.5.0
-├── pydantic>=2.0.0
-├── click>=8.0.0
-└── python-dotenv>=1.0.0
-
-crewai-tools>=1.10.1
-├── beautifulsoup4>=4.12.0
-├── requests>=2.31.0
-└── lxml>=5.0.0
-```
-
-### 4.2 手动下载地址
-
-| 包名 | PyPI 地址 |
-|------|----------|
-| crewai | https://pypi.org/project/crewai/#files |
-| crewai-tools | https://pypi.org/project/crewai-tools/#files |
-
----
-
-## 5. CrewAI 离线 Demo 运行
-
-### 5.1 验证安装
+### 3.1 基础验证
 
 ```bash
-# 检查 crewai
+# 检查 crewai 版本
 python -c "import crewai; print('crewai:', crewai.__version__)"
 
-# 检查 crewai-tools
-python -c "from crewai_tools import BaseTool; print('crewai-tools OK')"
+# 检查 tools
+python -c "from crewai_tools import FileReadTool; print('tools OK')"
 ```
 
-### 5.2 离线工具替代方案
+### 3.2 完整测试
 
 ```python
-# ✅ 离线工具（使用本地文件）
-from crewai_tools import FileReadTool, DirectorySearchTool
+from crewai import Agent, Task, Crew
+from crewai_tools import FileReadTool
 
-file_tool = FileReadTool(file_path="local_data.txt")
-dir_tool = DirectorySearchTool(directory="./data/")
+# 创建 Agent
+agent = Agent(
+    role="测试员",
+    goal="验证安装",
+    backstory="测试 crewai 是否正常工作",
+    tools=[FileReadTool()]
+)
+
+# 创建任务
+task = Task(
+    description="验证 crewai 安装",
+    expected_output="安装成功",
+    agent=agent
+)
+
+# 执行
+crew = Crew(agents=[agent], tasks=[task])
+result = crew.kickoff()
+
+print("✅ 安装验证成功！")
 ```
 
 ---
 
-## 6. 常见问题
+## 4. 常见问题
 
-### Q1: `pip install crewai-tools` 报错 "No matching distribution found"
+### Q1: `pip install "crewai[tools]"` 报错
+
+**错误**: `No matching distribution found`
 
 **解决方案**:
 
@@ -225,43 +173,46 @@ python -m pip install --upgrade pip
 # 2. 检查 Python 版本（需要 3.10+）
 python --version
 
-# 3. 尝试指定版本
-pip install crewai-tools==1.10.1
+# 3. 使用引号（bash 需要）
+pip install "crewai[tools]"
 
-# 4. 使用源码安装（慢但可靠）
-pip install crewai-tools --no-binary :all:
+# 4. 或使用转义
+pip install crewai\[tools\]
 
-# 5. 检查平台兼容性
-pip debug --verbose | grep "Compatible tags"
+# 5. 源码安装（慢但可靠）
+pip install "crewai[tools]" --no-binary :all:
 ```
 
 ---
 
-### Q2: 离线安装时提示缺少依赖
+### Q2: 导入 `crewai_tools` 失败
+
+**错误**: `ModuleNotFoundError: No module named 'crewai_tools'`
 
 **解决方案**:
 
 ```bash
-# 在有网环境重新下载，确保包含所有依赖
-pip download -r requirements.txt -d packages/ --no-binary :none:
+# 确认安装了 tools
+pip install "crewai[tools]"
+
+# 或单独安装
+pip install crewai-tools
+
+# 验证
+python -c "from crewai_tools import FileReadTool; print('OK')"
 ```
 
 ---
 
-### Q3: crewai-tools 安装成功但导入失败
-
-**检查**:
+### Q3: 离线环境如何验证版本？
 
 ```bash
-# 检查安装位置
+# 查看已安装的包
+pip list | grep crewai
+
+# 查看详细信息
+pip show crewai
 pip show crewai-tools
-
-# 检查 Python 路径
-python -c "import sys; print('\n'.join(sys.path))"
-
-# 尝试重新安装
-pip uninstall crewai-tools
-pip install crewai-tools --no-cache-dir
 ```
 
 ---
@@ -274,5 +225,17 @@ pip install crewai-tools --no-cache-dir
 
 ---
 
+## 🔗 官方资源
+
+| 资源 | 链接 |
+|------|------|
+| **GitHub** | https://github.com/crewAIInc/crewAI |
+| **文档** | https://docs.crewai.com |
+| **PyPI** | https://pypi.org/project/crewai/ |
+| **社区** | https://community.crewai.com |
+
+---
+
 **维护者**: Edu·伴学堂 📚  
-**最后更新**: 2026-03-15（已核实最新版本）
+**最后更新**: 2026-03-15 23:00（已核实正确安装方式）  
+**感谢**: 感谢用户指出正确的安装方式 `pip install "crewai[tools]"`！
