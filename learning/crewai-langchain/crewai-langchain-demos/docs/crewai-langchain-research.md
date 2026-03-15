@@ -166,14 +166,17 @@ reporting_task:
 
 ## 2. CrewAI 快速入门
 
-### 2.1 安装
+### 2.1 安装（2026 年 3 月更新）
 
 ```bash
-# 使用 uv（推荐）
-uv add crewai crewai-tools
+# ✅ 官方推荐方式（包含 tools）
+pip install "crewai[tools]"
 
-# 或使用 pip
-pip install crewai crewai-tools
+# 或使用 uv
+uv add "crewai[tools]"
+
+# 或只安装核心包（不含 tools）
+pip install crewai
 ```
 
 ### 2.2 创建项目

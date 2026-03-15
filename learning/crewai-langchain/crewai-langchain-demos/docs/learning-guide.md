@@ -147,9 +147,10 @@ export ANTHROPIC_API_KEY=sk-...
 
 ### 3.2 CrewAI 5 分钟上手（10 分钟）
 
-**步骤 1：安装**
+**步骤 1：安装（2026 年 3 月更新）**
 ```bash
-pip install crewai crewai-tools
+# ✅ 官方推荐方式（包含 tools）
+pip install "crewai[tools]"
 ```
 
 **步骤 2：创建第一个 Crew**
