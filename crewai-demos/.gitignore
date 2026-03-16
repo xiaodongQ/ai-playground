@@ -27,6 +27,34 @@ wheels/
 .env
 .env.local
 .env.*.local
+.env.*.dist
+
+# 密钥和证书文件
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.ppk
+
+# 凭证文件
+credentials.json
+service-account.json
+*-credentials.json
+service_account.json
+*.secret
+*.token
+
+# 配置文件（包含敏感信息）
+config.local.yaml
+config.local.json
+settings.local.py
+database.yml
+secrets.yml
 
 # IDE
 .vscode/
@@ -34,15 +62,36 @@ wheels/
 *.swp
 *.swo
 *~
+*.sublime-project
+*.sublime-workspace
 
 # 操作系统
 .DS_Store
 Thumbs.db
+.Spotlight-V100
+.Trashes
 
 # 日志
 *.log
+logs/
 
 # 临时文件
 tmp/
 temp/
 *.tmp
+*.bak
+*.backup
+
+# 测试覆盖率
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
