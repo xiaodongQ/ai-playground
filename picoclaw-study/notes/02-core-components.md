@@ -1,742 +1,612 @@
-# PicoClaw 核心组件详解
+# PicoClaw 核心组件分析
 
-> 🔧 深入分析四大核心模块的实现细节
-
-**学习时间**: 2026-03-29  
-**参考源码**: `pkg/agent/`, `pkg/tools/`, `cmd/gateway/`
+> 📌 深入解析 PicoClaw 的核心模块实现
 
 ---
 
-## 1. AgentInstance - 会话管理
+## 目录
 
-### 职责
-- 维护单个用户会话的完整生命周期
-- 管理消息历史和上下文
-- 协调 AgentLoop 执行
-
-### 核心结构
-
-```go
-// pkg/agent/instance.go
-type AgentInstance struct {
-    // 基础信息
-    ID        string            // 唯一会话 ID
-    ChannelID string            // 通道 ID (telegram/discord/slack)
-    UserID    string            // 用户 ID
-    
-    // 核心组件
-    Config    AgentConfig       // 配置
-    Loop      *AgentLoop        // 执行引擎
-    Tools     *ToolRegistry     // 工具注册表
-    
-    // 状态管理
-    Context   Context           // 执行上下文
-    State     InstanceState     // 实例状态 (active/paused/closed)
-    
-    // 消息历史
-    Messages  []Message         // 对话历史
-    MaxTokens int               // 最大 token 数
-    
-    // 资源
-    mu        sync.RWMutex      // 并发锁
-    createdAt time.Time         // 创建时间
-    lastActive time.Time        // 最后活跃时间
-}
-
-// 配置结构
-type AgentConfig struct {
-    Model            string            // LLM 模型
-    Temperature      float64           // 温度参数
-    MaxIterations    int               // 最大迭代次数
-    MaxTokens        int               // 最大输出 token
-    SystemPrompt     string            // 系统提示词
-    ToolContext      map[string]any    // 工具上下文 (channel/chatID 等)
-}
-```
-
-### 关键方法
-
-#### 1.1 创建实例
-
-```go
-func NewAgentInstance(config AgentConfig) *AgentInstance {
-    return &AgentInstance{
-        ID:        generateID(),
-        Config:    config,
-        Loop:      NewAgentLoop(config),
-        Tools:     NewToolRegistry(),
-        Context:   NewContext(),
-        State:     StateActive,
-        Messages:  make([]Message, 0),
-        createdAt: time.Now(),
-        lastActive: time.Now(),
-    }
-}
-
-// 注册内置工具
-func (a *AgentInstance) SetupDefaultTools() {
-    a.Tools.Register(&SearchTool{})
-    a.Tools.Register(&FileReadTool{})
-    a.Tools.Register(&FileWriteTool{})
-    a.Tools.Register(&ShellTool{})
-    a.Tools.Register(&HTTPRequestTool{})
-}
-```
-
-#### 1.2 处理消息
-
-```go
-func (a *AgentInstance) ProcessMessage(input Message) (Response, error) {
-    a.mu.Lock()
-    defer a.mu.Unlock()
-    
-    // 1. 添加用户消息到历史
-    a.Messages = append(a.Messages, input)
-    a.lastActive = time.Now()
-    
-    // 2. 裁剪消息历史（防止超出 token 限制）
-    a.trimMessages()
-    
-    // 3. 调用 AgentLoop 执行
-    response, err := a.Loop.Run(a.Context, a.Messages)
-    if err != nil {
-        return Response{}, err
-    }
-    
-    // 4. 添加助手响应到历史
-    a.Messages = append(a.Messages, response.ToMessage())
-    
-    return response, nil
-}
-```
-
-#### 1.3 消息裁剪
-
-```go
-func (a *AgentInstance) trimMessages() {
-    // 策略：保留最近的 N 条消息，确保不超过 token 限制
-    for len(a.Messages) > 2 && a.estimateTokens() > a.MaxTokens {
-        // 移除最早的非系统消息
-        a.Messages = a.Messages[1:]
-    }
-}
-
-func (a *AgentInstance) estimateTokens() int {
-    // 简单估算：每 4 个字符 ≈ 1 token
-    total := 0
-    for _, msg := range a.Messages {
-        total += len(msg.Content) / 4
-    }
-    return total
-}
-```
-
-#### 1.4 资源清理
-
-```go
-func (a *AgentInstance) Close() error {
-    a.mu.Lock()
-    defer a.mu.Unlock()
-    
-    a.State = StateClosed
-    
-    // 清理工具资源
-    for _, tool := range a.Tools.All() {
-        if closer, ok := tool.(io.Closer); ok {
-            closer.Close()
-        }
-    }
-    
-    // 清空消息历史
-    a.Messages = nil
-    a.Context = nil
-    
-    return nil
-}
-```
-
-### 状态机
-
-```
-┌─────────────┐
-│   Created   │
-└──────┬──────┘
-       │ Start()
-       ▼
-┌─────────────┐
-│   Active    │◄────┐
-└──────┬──────┘     │
-       │            │ ProcessMessage()
-       │ Pause()    │
-       ▼            │
-┌─────────────┐     │
-│   Paused    │─────┘
-└──────┬──────┘   Resume()
-       │
-       │ Close()
-       ▼
-┌─────────────┐
-│   Closed    │ (终态)
-└─────────────┘
-```
+1. [AgentLoop - 执行循环](#1-agentloop---执行循环)
+2. [AgentInstance - Agent 实例](#2-agentinstance---agent 实例)
+3. [ToolRegistry - 工具注册](#3-toolregistry---工具注册)
+4. [Provider - LLM 适配](#4-provider---llm 适配)
+5. [ContextManager - 上下文管理](#5-contextmanager---上下文管理)
+6. [SessionStore - 会话存储](#6-sessionstore---会话存储)
 
 ---
 
-## 2. AgentLoop - 执行引擎
+## 1. AgentLoop - 执行循环
 
-### 职责
-- 执行 LLM 调用循环
-- 解析和调度工具调用
-- 控制迭代次数
-
-### 核心结构
+### 1.1 核心结构
 
 ```go
 // pkg/agent/loop.go
 type AgentLoop struct {
-    // 依赖
-    LLM           LLMProvider      // LLM 提供商接口
-    Tools         *ToolRegistry    // 工具注册表
-    
-    // 配置
-    MaxIterations int              // 最大迭代次数
-    MaxTokens     int              // 最大输出 token
-    Model         string           // 模型名称
-    
-    // 运行时
-    currentIteration int           // 当前迭代次数
-}
+    // 核心依赖
+    bus      *bus.MessageBus         // 消息总线
+    cfg      *config.Config          // 配置
+    registry *AgentRegistry          // Agent 注册表
+    state    *state.Manager          // 状态管理
 
-// LLM 提供商接口
-type LLMProvider interface {
-    Call(ctx Context, messages []Message, tools []ToolDef) (Response, error)
-    Name() string
+    // 事件系统
+    eventBus *EventBus               // 事件总线
+    hooks    *HookManager            // Hook 管理
+
+    // 运行时状态
+    running        atomic.Bool
+    contextManager ContextManager
+    fallback       *providers.FallbackChain  // 降级链
+    channelManager *channels.Manager         // 通道管理
+    mediaStore     media.MediaStore          // 媒体存储
+    
+    // 并发控制
+    activeTurnStates sync.Map     // 活跃 Turn 状态
+    subTurnCounter   atomic.Int64 // SubTurn 计数器
 }
 ```
 
-### 核心方法
-
-#### 2.1 主循环
+### 1.2 初始化流程
 
 ```go
-func (a *AgentLoop) Run(ctx Context, messages []Message) (Response, error) {
-    a.currentIteration = 0
+func NewAgentLoop(
+    cfg *config.Config,
+    msgBus *bus.MessageBus,
+    provider providers.LLMProvider,
+) *AgentLoop {
+    // 1. 创建 Agent Registry
+    registry := NewAgentRegistry(cfg, provider)
     
-    // 创建消息副本（避免修改原始数据）
-    workingMessages := make([]Message, len(messages))
-    copy(workingMessages, messages)
+    // 2. 设置降级链（带限流）
+    cooldown := providers.NewCooldownTracker()
+    rl := providers.NewRateLimiterRegistry()
+    fallbackChain := providers.NewFallbackChain(cooldown, rl)
     
-    for a.currentIteration < a.MaxIterations {
-        a.currentIteration++
-        
-        // 1. 调用 LLM
-        response, err := a.LLM.Call(ctx, workingMessages, a.Tools.Definitions())
+    // 3. 创建状态管理
+    stateManager := state.NewManager(defaultAgent.Workspace)
+    
+    // 4. 创建事件总线
+    eventBus := NewEventBus()
+    
+    // 5. 初始化 Loop
+    al := &AgentLoop{
+        bus:         msgBus,
+        cfg:         cfg,
+        registry:    registry,
+        state:       stateManager,
+        eventBus:    eventBus,
+        fallback:    fallbackChain,
+        steering:    newSteeringQueue(cfg.Agents.Defaults.SteeringMode),
+    }
+    
+    // 6. 注册共享工具（web, message, spawn 等）
+    registerSharedTools(al, cfg, msgBus, registry, provider)
+    
+    return al
+}
+```
+
+### 1.3 主循环实现
+
+```go
+func (al *AgentLoop) Run(ctx context.Context) error {
+    al.running.Store(true)
+    
+    // 初始化 Hook 和 MCP
+    if err := al.ensureHooksInitialized(ctx); err != nil {
+        return err
+    }
+    
+    idleTicker := time.NewTicker(100 * time.Millisecond)
+    defer idleTicker.Stop()
+    
+    for {
+        select {
+        case <-ctx.Done():
+            return nil
+        case <-idleTicker.C:
+            if !al.running.Load() {
+                return nil
+            }
+        case msg, ok := <-al.bus.InboundChan():
+            if !ok {
+                return nil
+            }
+            
+            // 处理消息（在 goroutine 中）
+            go func() {
+                defer al.channelManager.InvokeTypingStop(msg.Channel, msg.ChatID)
+                
+                response, err := al.processMessage(ctx, msg)
+                if err != nil {
+                    response = fmt.Sprintf("Error: %v", err)
+                }
+                
+                // 发布响应
+                al.PublishResponseIfNeeded(ctx, msg.Channel, msg.ChatID, response)
+            }()
+        }
+    }
+}
+```
+
+### 1.4 消息处理流程
+
+```go
+func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage) (string, error) {
+    // 1. 解析路由
+    route, agentID, err := al.resolveMessageRoute(msg)
+    if err != nil {
+        return "", err
+    }
+    
+    // 2. 获取 Agent
+    agent, ok := al.registry.GetAgent(agentID)
+    if !ok {
+        return "", fmt.Errorf("agent not found")
+    }
+    
+    // 3. 创建 Turn State
+    turnState := al.createTurnState(ctx, agent, msg)
+    
+    // 4. 进入执行循环
+    return al.RunToolLoop(ctx, turnState, agent)
+}
+```
+
+### 1.5 工具执行循环
+
+```go
+// RunToolLoop 执行工具调用循环
+func (al *AgentLoop) RunToolLoop(ctx context.Context, ts *turnState, agent *AgentInstance) (string, error) {
+    var finalResponse string
+    var lastErr error
+    
+    for iteration := 0; iteration < agent.MaxIterations; iteration++ {
+        // 1. 构建上下文
+        messages, err := agent.ContextBuilder.Build(ctx, ts.session)
         if err != nil {
-            return Response{}, fmt.Errorf("LLM call failed: %w", err)
+            return "", err
         }
         
-        // 2. 检查是否有工具调用
-        if len(response.ToolCalls) == 0 {
-            // 没有工具调用，返回最终答案
-            return response, nil
+        // 2. 调用 LLM
+        response, err := al.callLLM(ctx, agent, messages, agent.Tools)
+        if err != nil {
+            lastErr = err
+            continue
         }
         
-        // 3. 执行所有工具调用
-        for _, toolCall := range response.ToolCalls {
-            // 3.1 查找工具
-            tool := a.Tools.Get(toolCall.Name)
-            if tool == nil {
-                return Response{}, fmt.Errorf("tool not found: %s", toolCall.Name)
-            }
+        // 3. 处理响应
+        if response.Content != "" {
+            finalResponse = response.Content
+        }
+        
+        // 4. 执行工具调用
+        if len(response.ToolCalls) > 0 {
+            results := al.executeTools(ctx, ts, response.ToolCalls)
             
-            // 3.2 执行工具
-            result, err := tool.Execute(ctx, toolCall.Parameters)
-            if err != nil {
-                return Response{}, fmt.Errorf("tool execution failed: %w", err)
+            // 将结果添加到上下文
+            for _, result := range results {
+                ts.session.AddToolResult(result)
             }
-            
-            // 3.3 添加结果到消息历史
-            workingMessages = append(workingMessages, result.ToMessage())
+            continue
+        }
+        
+        // 5. 有最终响应，退出循环
+        if finalResponse != "" {
+            break
         }
     }
     
-    // 达到最大迭代次数
-    return Response{
-        Content: "I reached the maximum number of iterations.",
-        Error:   ErrMaxIterations,
-    }, nil
-}
-```
-
-#### 2.2 流式处理（可选）
-
-```go
-func (a *AgentLoop) RunStream(ctx Context, messages []Message) (<-chan StreamEvent, error) {
-    eventChan := make(chan StreamEvent, 10)
-    
-    go func() {
-        defer close(eventChan)
-        
-        // 发送开始事件
-        eventChan <- StreamEvent{Type: EventStart}
-        
-        for a.currentIteration < a.MaxIterations {
-            // 发送迭代开始事件
-            eventChan <- StreamEvent{
-                Type: EventIterationStart,
-                Iteration: a.currentIteration,
-            }
-            
-            // ... 执行逻辑 ...
-            
-            // 发送工具执行事件
-            eventChan <- StreamEvent{
-                Type: EventToolCall,
-                ToolName: toolCall.Name,
-                Parameters: toolCall.Parameters,
-            }
-        }
-        
-        // 发送结束事件
-        eventChan <- StreamEvent{Type: EventEnd}
-    }()
-    
-    return eventChan, nil
-}
-
-// 流式事件类型
-type StreamEventType int
-
-const (
-    EventStart StreamEventType = iota
-    EventIterationStart
-    EventLLMCall
-    EventToolCall
-    EventToolResult
-    EventEnd
-)
-
-type StreamEvent struct {
-    Type     StreamEventType
-    Iteration int
-    ToolName string
-    Content  string
+    return finalResponse, lastErr
 }
 ```
 
 ---
 
-## 3. ToolRegistry - 工具管理
+## 2. AgentInstance - Agent 实例
 
-### 职责
-- 工具的注册和发现
-- 生成 LLM 工具定义
-- 执行工具调用
-
-### 核心结构
+### 2.1 结构定义
 
 ```go
-// pkg/tools/registry.go
-type ToolRegistry struct {
-    mu    sync.RWMutex          // 并发控制
-    tools map[string]Tool       // 工具映射：name -> Tool
-}
-
-// 工具接口
-type Tool interface {
-    Name() string                                    // 工具名称
-    Description() string                             // 工具描述
-    Parameters() map[string]ParameterSchema          // 参数定义
-    Execute(ctx Context, params map[string]any) (Result, error)
-}
-
-// 参数 schema
-type ParameterSchema struct {
-    Type        string   // string/number/boolean/array/object
-    Description string   // 参数描述
-    Required    bool     // 是否必填
-    Enum        []string // 枚举值（可选）
-    Default     any      // 默认值（可选）
-}
-
-// 工具定义（发送给 LLM 的格式）
-type ToolDef struct {
-    Name        string                 `json:"name"`
-    Description string                 `json:"description"`
-    Parameters  map[string]ParameterSchema `json:"parameters"`
-}
-
-// 工具调用（LLM 返回的格式）
-type ToolCall struct {
-    ID         string                 `json:"id"`
-    Name       string                 `json:"name"`
-    Parameters map[string]any         `json:"parameters"`
-}
-
-// 执行结果
-type Result struct {
-    ToolCallID string  `json:"tool_call_id"`
-    Content    string  `json:"content"`
-    Error      error   `json:"error,omitempty"`
-    Metadata   map[string]any `json:"metadata,omitempty"`
+// pkg/agent/instance.go
+type AgentInstance struct {
+    // 基础配置
+    ID            string
+    Name          string
+    Model         string
+    Fallbacks     []string
+    
+    // 工作空间
+    Workspace     string
+    
+    // 执行限制
+    MaxIterations int
+    MaxTokens     int
+    Temperature   float64
+    ThinkingLevel ThinkingLevel
+    
+    // 上下文管理
+    ContextWindow             int
+    SummarizeMessageThreshold int
+    SummarizeTokenPercent     int
+    
+    // 核心组件
+    Provider       providers.LLMProvider
+    Sessions       session.SessionStore
+    ContextBuilder *ContextBuilder
+    Tools          *tools.ToolRegistry
+    
+    // 模型路由
+    Router          *routing.Router
+    LightCandidates []providers.FallbackCandidate
 }
 ```
 
-### 关键方法
-
-#### 3.1 注册工具
+### 2.2 初始化
 
 ```go
-func (t *ToolRegistry) Register(tool Tool) {
-    t.mu.Lock()
-    defer t.mu.Unlock()
+func NewAgentInstance(
+    agentCfg *config.AgentConfig,
+    defaults *config.AgentDefaults,
+    cfg *config.Config,
+    provider providers.LLMProvider,
+) *AgentInstance {
+    // 1. 解析工作空间
+    workspace := resolveAgentWorkspace(agentCfg, defaults)
+    os.MkdirAll(workspace, 0o755)
     
-    name := tool.Name()
-    if _, exists := t.tools[name]; exists {
-        log.Printf("Warning: tool %s already registered, overwriting", name)
+    // 2. 解析模型配置
+    model := resolveAgentModel(agentCfg, defaults)
+    fallbacks := resolveAgentFallbacks(agentCfg, defaults)
+    
+    // 3. 创建工具注册表
+    toolsRegistry := tools.NewToolRegistry()
+    
+    // 4. 注册文件操作工具
+    if cfg.Tools.IsToolEnabled("read_file") {
+        toolsRegistry.Register(tools.NewReadFileTool(...))
+    }
+    if cfg.Tools.IsToolEnabled("write_file") {
+        toolsRegistry.Register(tools.NewWriteFileTool(...))
+    }
+    if cfg.Tools.IsToolEnabled("exec") {
+        toolsRegistry.Register(tools.NewExecTool(...))
     }
     
-    t.tools[name] = tool
-    log.Printf("Tool registered: %s", name)
-}
-```
-
-#### 3.2 生成工具定义
-
-```go
-func (t *ToolRegistry) Definitions() []ToolDef {
-    t.mu.RLock()
-    defer t.mu.RUnlock()
+    // 5. 创建会话存储
+    sessionsDir := filepath.Join(workspace, "sessions")
+    sessions := initSessionStore(sessionsDir)
     
-    defs := make([]ToolDef, 0, len(t.tools))
-    for _, tool := range t.tools {
-        defs = append(defs, ToolDef{
-            Name:        tool.Name(),
-            Description: tool.Description(),
-            Parameters:  tool.Parameters(),
+    // 6. 创建上下文构建器
+    contextBuilder := NewContextBuilder(workspace).
+        WithToolDiscovery(...).
+        WithSplitOnMarker(cfg.Agents.Defaults.SplitOnMarker)
+    
+    // 7. 模型路由设置
+    var router *routing.Router
+    var lightCandidates []providers.FallbackCandidate
+    if rc := defaults.Routing; rc != nil && rc.Enabled {
+        router = routing.New(routing.RouterConfig{
+            LightModel: rc.LightModel,
+            Threshold:  rc.Threshold,
         })
     }
     
-    return defs
+    return &AgentInstance{
+        ID:            agentID,
+        Model:         model,
+        Workspace:     workspace,
+        MaxIterations: defaults.MaxToolIterations,
+        MaxTokens:     defaults.MaxTokens,
+        Provider:      provider,
+        Sessions:      sessions,
+        ContextBuilder: contextBuilder,
+        Tools:         toolsRegistry,
+        Router:        router,
+    }
 }
 ```
 
-#### 3.3 执行工具
+---
+
+## 3. ToolRegistry - 工具注册
+
+### 3.1 工具接口
 
 ```go
-func (t *ToolRegistry) Execute(call ToolCall) Result {
-    t.mu.RLock()
-    tool, exists := t.tools[call.Name]
-    t.mu.RUnlock()
+// pkg/tools/registry.go
+type Tool interface {
+    Name() string
+    Definition() ToolDefinition
+    Execute(ctx context.Context, params map[string]any) (*ToolResult, error)
+}
+
+type ToolDefinition struct {
+    Name        string         `json:"name"`
+    Description string         `json:"description"`
+    Parameters  jsonschema.Schema `json:"parameters"`
+}
+
+type ToolResult struct {
+    Content    string
+    IsError    bool
+    ForLLM     string  // 给 LLM 看的结果
+    ForUser    string  // 给用户看的结果
+}
+```
+
+### 3.2 注册表实现
+
+```go
+type ToolRegistry struct {
+    tools map[string]Tool
+    mu    sync.RWMutex
+}
+
+func (r *ToolRegistry) Register(tool Tool) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    r.tools[tool.Name()] = tool
+}
+
+func (r *ToolRegistry) Get(name string) (Tool, bool) {
+    r.mu.RLock()
+    defer r.mu.RUnlock()
+    tool, ok := r.tools[name]
+    return tool, ok
+}
+
+func (r *ToolRegistry) List() []string {
+    r.mu.RLock()
+    defer r.mu.RUnlock()
+    names := make([]string, 0, len(r.tools))
+    for name := range r.tools {
+        names = append(names, name)
+    }
+    return names
+}
+```
+
+### 3.3 内置工具
+
+| 工具名 | 功能 | 文件 |
+|--------|------|------|
+| `read_file` | 读取文件内容 | `tools/file.go` |
+| `write_file` | 写入文件 | `tools/file.go` |
+| `edit_file` | 编辑文件（diff） | `tools/file.go` |
+| `list_dir` | 列出目录 | `tools/file.go` |
+| `exec` | 执行 shell 命令 | `tools/exec.go` |
+| `web` | 网络搜索 | `tools/web.go` |
+| `web_fetch` | 抓取网页内容 | `tools/web.go` |
+| `message` | 发送消息 | `tools/message.go` |
+| `send_file` | 发送文件 | `tools/media.go` |
+| `spawn` | 生成子 Agent | `tools/spawn.go` |
+| `skills` | 技能管理 | `tools/skills.go` |
+
+---
+
+## 4. Provider - LLM 适配
+
+### 4.1 Provider 接口
+
+```go
+// pkg/providers/interface.go
+type LLMProvider interface {
+    Chat(
+        ctx context.Context,
+        messages []Message,
+        tools []ToolDefinition,
+        model string,
+        options map[string]any,
+    ) (*LLMResponse, error)
     
-    if !exists {
-        return Result{
-            ToolCallID: call.ID,
-            Error:      fmt.Errorf("tool not found: %s", call.Name),
+    GetDefaultModel() string
+}
+
+type LLMResponse struct {
+    Content   string
+    ToolCalls []ToolCall
+    Usage     TokenUsage
+}
+
+type ToolCall struct {
+    ID       string
+    Name     string
+    Arguments map[string]any
+}
+```
+
+### 4.2 支持的 Provider
+
+```
+pkg/providers/
+├── interface.go           # 接口定义
+├── fallback.go            # 降级链
+├── openai/                # OpenAI 兼容
+│   ├── provider.go
+│   └── chat.go
+├── ollama/                # Ollama
+│   └── provider.go
+├── anthropic/             # Claude
+│   └── provider.go
+└── ...                    # 其他
+```
+
+### 4.3 降级链
+
+```go
+// pkg/providers/fallback.go
+type FallbackChain struct {
+    candidates []FallbackCandidate
+    cooldown   *CooldownTracker
+    rateLimiter *RateLimiterRegistry
+}
+
+type FallbackCandidate struct {
+    Model     string
+    Provider  string
+    Priority  int
+}
+
+func (f *FallbackChain) Chat(ctx context.Context, messages, tools) (*LLMResponse, error) {
+    var lastErr error
+    
+    for _, candidate := range f.candidates {
+        // 检查限流
+        if f.rateLimiter.IsRateLimited(candidate) {
+            continue
         }
+        
+        // 尝试调用
+        response, err := f.callCandidate(ctx, candidate, messages, tools)
+        if err == nil {
+            return response, nil
+        }
+        
+        lastErr = err
+        f.cooldown.MarkFailed(candidate)
     }
     
-    // 执行工具（带 recover 防止 panic）
-    var result Result
-    func() {
-        defer func() {
-            if r := recover(); r != nil {
-                result = Result{
-                    ToolCallID: call.ID,
-                    Error:      fmt.Errorf("tool panic: %v", r),
-                }
-            }
-        }()
-        
-        result, _ = tool.Execute(NewContext(), call.Parameters)
-        result.ToolCallID = call.ID
-    }()
+    return nil, lastErr
+}
+```
+
+---
+
+## 5. ContextManager - 上下文管理
+
+### 5.1 上下文构建器
+
+```go
+// pkg/agent/context.go
+type ContextBuilder struct {
+    workspace string
+    toolDiscovery bool
+    splitOnMarker bool
+}
+
+func (b *ContextBuilder) Build(ctx context.Context, session Session) ([]Message, error) {
+    var messages []Message
+    
+    // 1. 系统提示词
+    systemPrompt := b.buildSystemPrompt()
+    messages = append(messages, Message{Role: "system", Content: systemPrompt})
+    
+    // 2. 会话历史
+    history, err := session.GetHistory()
+    if err != nil {
+        return nil, err
+    }
+    messages = append(messages, history...)
+    
+    // 3. 上下文压缩（如果超出限制）
+    if len(messages) > b.maxContextLength {
+        messages = b.compress(messages)
+    }
+    
+    return messages, nil
+}
+```
+
+### 5.2 上下文压缩策略
+
+```go
+func (b *ContextBuilder) compress(messages []Message) []Message {
+    // 1. 保留系统提示词
+    result := []Message{messages[0]}
+    
+    // 2. 保留最近的 N 条消息
+    keepCount := b.calculateKeepCount()
+    if len(messages) > keepCount {
+        result = append(result, messages[len(messages)-keepCount:]...)
+    } else {
+        result = append(result, messages[1:]...)
+    }
     
     return result
 }
 ```
 
-### 内置工具示例
+---
+
+## 6. SessionStore - 会话存储
+
+### 6.1 会话接口
 
 ```go
-// 示例：Shell 工具
-type ShellTool struct{}
+// pkg/session/store.go
+type SessionStore interface {
+    Get(sessionKey string) (*Session, error)
+    Save(sessionKey string, session *Session) error
+    Delete(sessionKey string) error
+    List() ([]string, error)
+    Close() error
+}
+```
 
-func (s *ShellTool) Name() string { return "shell" }
+### 6.2 JSONL 存储实现
 
-func (s *ShellTool) Description() string {
-    return "Execute a shell command and return the output"
+```go
+// pkg/memory/jsonl.go
+type JSONLStore struct {
+    dir      string
+    sessions map[string]*Session
+    mu       sync.Mutex
+    file     *os.File
 }
 
-func (s *ShellTool) Parameters() map[string]ParameterSchema {
-    return map[string]ParameterSchema{
-        "command": {
-            Type:        "string",
-            Description: "The shell command to execute",
-            Required:    true,
-        },
-        "timeout": {
-            Type:        "number",
-            Description: "Timeout in seconds (default: 30)",
-            Required:    false,
-            Default:     30,
-        },
-    }
-}
-
-func (s *ShellTool) Execute(ctx Context, params map[string]any) (Result, error) {
-    command, ok := params["command"].(string)
-    if !ok {
-        return Result{}, fmt.Errorf("invalid command parameter")
-    }
+func (s *JSONLStore) Save(key string, session *Session) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
     
-    timeout := 30 * time.Second
-    if t, ok := params["timeout"].(float64); ok {
-        timeout = time.Duration(t) * time.Second
-    }
+    // 追加到 JSONL 文件
+    data, _ := json.Marshal(session)
+    s.file.Write(data)
+    s.file.Write([]byte("\n"))
     
-    // 执行命令
-    cmdCtx, cancel := context.WithTimeout(context.Background(), timeout)
-    defer cancel()
-    
-    cmd := exec.CommandContext(cmdCtx, "sh", "-c", command)
-    output, err := cmd.CombinedOutput()
-    
-    if err != nil {
-        return Result{
-            Content: string(output),
-            Error:   err,
-        }, nil // 返回错误但不中断流程
-    }
-    
-    return Result{
-        Content: string(output),
-        Metadata: map[string]any{
-            "exit_code": cmd.ProcessState.ExitCode(),
-        },
-    }, nil
+    s.sessions[key] = session
+    return nil
 }
 ```
 
 ---
 
-## 4. Gateway - 多通道网关
+## 🔗 组件关系图
 
-### 职责
-- HTTP 服务器管理
-- 通道适配器注册
-- 消息路由和分发
-- 健康检查和监控
-
-### 核心结构
-
-```go
-// cmd/gateway/main.go
-type Gateway struct {
-    // 服务器
-    server     *http.Server
-    port       int
-    
-    // 组件
-    channels   map[string]Channel       // 通道适配器
-    instances  map[string]*AgentInstance // 会话实例
-    tools      *ToolRegistry            // 全局工具注册表
-    
-    // 配置
-    config     GatewayConfig
-    
-    // 资源
-    mu         sync.RWMutex
-    shutdownCh chan struct{}
-}
-
-// 通道接口
-type Channel interface {
-    Name() string                                    // 通道名称
-    Connect(config ChannelConfig) error              // 连接
-    Disconnect() error                               // 断开
-    SendMessage(target string, msg Message) error    // 发送消息
-}
-
-// 网关配置
-type GatewayConfig struct {
-    Port           int               // HTTP 端口
-    Channels       []ChannelConfig   // 通道配置
-    InstanceConfig AgentConfig       // 默认 Agent 配置
-    MaxInstances   int               // 最大会话数
-    IdleTimeout    time.Duration     // 空闲超时
-}
 ```
-
-### 关键方法
-
-#### 4.1 启动服务器
-
-```go
-func (g *Gateway) Start() error {
-    // 1. 注册 HTTP 路由
-    http.HandleFunc("/health", g.handleHealth)
-    http.HandleFunc("/api/message", g.handleMessage)
-    http.HandleFunc("/api/instances", g.handleInstances)
-    
-    // 2. 初始化通道
-    for _, chConfig := range g.config.Channels {
-        channel := g.createChannel(chConfig.Type)
-        if err := channel.Connect(chConfig); err != nil {
-            return fmt.Errorf("failed to connect channel %s: %w", chConfig.Type, err)
-        }
-        g.channels[chConfig.Type] = channel
-        log.Printf("Channel connected: %s", chConfig.Type)
-    }
-    
-    // 3. 启动 HTTP 服务器
-    addr := fmt.Sprintf(":%d", g.port)
-    log.Printf("Gateway starting on %s", addr)
-    
-    return g.server.ListenAndServe()
-}
-```
-
-#### 4.2 消息处理
-
-```go
-func (g *Gateway) handleMessage(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
-    
-    // 1. 解析请求
-    var req MessageRequest
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
-    
-    // 2. 获取或创建会话实例
-    instanceKey := fmt.Sprintf("%s:%s", req.ChannelID, req.UserID)
-    instance := g.getOrCreateInstance(instanceKey)
-    
-    // 3. 处理消息
-    response, err := instance.ProcessMessage(req.Message)
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    
-    // 4. 返回响应
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(response)
-}
-```
-
-#### 4.3 会话管理
-
-```go
-func (g *Gateway) getOrCreateInstance(key string) *AgentInstance {
-    g.mu.RLock()
-    instance, exists := g.instances[key]
-    g.mu.RUnlock()
-    
-    if exists {
-        return instance
-    }
-    
-    // 创建新实例
-    g.mu.Lock()
-    defer g.mu.Unlock()
-    
-    // 检查实例数量限制
-    if len(g.instances) >= g.config.MaxInstances {
-        // 清理最久未使用的实例
-        g.evictOldestInstance()
-    }
-    
-    instance = NewAgentInstance(g.config.InstanceConfig)
-    instance.SetupDefaultTools()
-    g.instances[key] = instance
-    
-    log.Printf("New instance created: %s", key)
-    return instance
-}
-
-func (g *Gateway) evictOldestInstance() {
-    var oldestKey string
-    var oldestTime time.Time
-    
-    for key, instance := range g.instances {
-        if oldestKey == "" || instance.lastActive.Before(oldestTime) {
-            oldestKey = key
-            oldestTime = instance.lastActive
-        }
-    }
-    
-    if oldestKey != "" {
-        g.instances[oldestKey].Close()
-        delete(g.instances, oldestKey)
-        log.Printf("Instance evicted: %s", oldestKey)
-    }
-}
+┌─────────────────────────────────────────────────────────┐
+│                    Gateway                               │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │                  AgentLoop                          │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌───────────┐ │
+│  │  │ AgentRegistry│──│ AgentInstance│  │ Tools     │ │
+│  │  │              │  │              │  │ Registry  │ │
+│  │  └──────────────┘  └──────┬───────┘  └───────────┘ │
+│  │                           │                         │
+│  │  ┌──────────────┐  ┌──────▼───────┐  ┌───────────┐ │
+│  │  │ EventBus     │  │ ContextBuilder│ │ Provider  │ │
+│  │  └──────────────┘  └──────────────┘  └───────────┘ │
+│  └────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+         │                              │
+         ▼                              ▼
+┌─────────────────┐          ┌─────────────────┐
+│ MessageBus      │          │ LLM API         │
+│ - Inbound       │          │ - OpenAI        │
+│ - Outbound      │          │ - Claude        │
+└────────┬────────┘          │ - Ollama        │
+         │                   └─────────────────┘
+         ▼
+┌─────────────────┐
+│ Channels        │
+│ - Telegram      │
+│ - Discord       │
+│ - Feishu        │
+│ - ...           │
+└─────────────────┘
 ```
 
 ---
 
-## 📊 组件交互图
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Gateway                                 │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │  HTTP Server                                              │ │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │ │
-│  │  │ /health     │  │ /api/message│  │ /api/...    │       │ │
-│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘       │ │
-│  └─────────┼────────────────┼────────────────┼───────────────┘ │
-│            │                │                │                 │
-│            └────────────────┼────────────────┘                 │
-│                             │                                  │
-│              ┌──────────────▼──────────────┐                  │
-│              │    InstanceManager          │                  │
-│              │  (getOrCreateInstance)      │                  │
-│              └──────────────┬──────────────┘                  │
-│                             │                                  │
-│              ┌──────────────▼──────────────┐                  │
-│              │    AgentInstance #1         │                  │
-│              │  ┌───────────────────────┐  │                  │
-│              │  │    AgentLoop          │  │                  │
-│              │  │  ┌─────────────────┐  │  │                  │
-│              │  │  │   LLM Provider  │  │  │                  │
-│              │  │  └────────┬────────┘  │  │                  │
-│              │  │           │           │  │                  │
-│              │  │  ┌────────▼────────┐  │  │                  │
-│              │  │  │  ToolRegistry   │  │  │                  │
-│              │  │  │ ┌────┐ ┌────┐  │  │  │                  │
-│              │  │  │ │Srch│ │File│  │  │  │                  │
-│              │  │  │ └────┘ └────┘  │  │  │                  │
-│              │  │  └─────────────────┘  │  │                  │
-│              │  └───────────────────────┘  │                  │
-│              └─────────────────────────────┘                  │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🔍 源码阅读建议
-
-### 阅读顺序
-1. `pkg/tools/registry.go` - 最简单，理解工具接口
-2. `pkg/agent/loop.go` - 核心执行逻辑
-3. `pkg/agent/instance.go` - 会话管理
-4. `cmd/gateway/main.go` - 集成和启动
-
-### 重点关注
-- 接口定义（理解抽象层次）
-- 错误处理（理解容错机制）
-- 并发控制（理解锁的使用）
-- 配置管理（理解灵活性设计）
-
----
-
-**下一篇**: [03-execution-flow.md](03-execution-flow.md)
-
-最后更新：2026-03-29
+**最后更新**: 2026-04-08  
+**基于版本**: PicoClaw v1.x

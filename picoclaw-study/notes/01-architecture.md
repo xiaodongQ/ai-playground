@@ -1,395 +1,400 @@
 # PicoClaw 架构解析
 
-> 🏗️ 深入理解 PicoClaw 的整体架构和设计哲学
-
-**学习时间**: 2026-03-29  
-**参考版本**: PicoClaw v1.x (Go 实现)
-
----
-
-## 🎯 定位与特点
-
-### 什么是 PicoClaw？
-
-PicoClaw 是 OpenClaw 生态中的**超轻量级 AI Agent 框架**，用 Go 从头重写，专为资源受限环境设计。
-
-### 核心特点
-
-| 特点 | 说明 | 优势 |
-|------|------|------|
-| **极简** | 代码量仅为 OpenClaw 的 1% | 易于理解和维护 |
-| **轻量** | 内存占用 < 10MB | 可运行在边缘设备 |
-| **快速** | 启动时间 < 1 秒 | 即时响应 |
-| **独立** | 单二进制部署 | 无需运行时依赖 |
-| **灵活** | 支持多 LLM 提供商 | 适配不同需求 |
-
-### 与 OpenClaw 对比
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     OpenClaw                                │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
-│  │  Gateway    │  │   Skills    │  │   Memory    │         │
-│  │ (TypeScript)│  │  (Plugin)   │  │  (Vector)   │         │
-│  └─────────────┘  └─────────────┘  └─────────────┘         │
-│  内存：1.5GB+  |  启动：~9 分钟  |  部署：npm + node        │
-└─────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────┐
-│                     PicoClaw                                │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │              Single Go Binary (~5MB)                │   │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐            │   │
-│  │  │  Agent   │ │  Tools   │ │ Gateway  │            │   │
-│  │  │  Loop    │ │ Registry │ │ (HTTP)   │            │   │
-│  │  └──────────┘ └──────────┘ └──────────┘            │   │
-│  └─────────────────────────────────────────────────────┘   │
-│  内存：<10MB  |  启动：<1 秒  |  部署：单二进制             │
-└─────────────────────────────────────────────────────────────┘
-```
+> 📌 基于实际源码的架构分析（2026 年版本）
 
 ---
 
 ## 🏗️ 整体架构
 
-### 架构图
-
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                        Client Channels                         │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐    │
-│  │ Telegram  │  │  Discord  │  │   Slack   │  │   HTTP    │    │
-│  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘    │
-│        │              │              │              │          │
-│        └──────────────┴──────────────┴──────────────┘          │
-│                              │                                 │
-│                              ▼                                 │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │                    PicoClaw Gateway                       │ │
-│  │  ┌─────────────────────────────────────────────────────┐  │ │
-│  │  │              Channel Adapter Layer                  │  │ │
-│  │  │   (统一消息格式转换：Platform Message → Internal)      │  │ │
-│  │  └─────────────────────────────────────────────────────┘  │ │
-│  │                            │                              │ │
-│  │                            ▼                              │ │
-│  │  ┌─────────────────────────────────────────────────────┐  │ │
-│  │  │              AgentInstance Manager                  │  │ │
-│  │  │   (会话管理：创建/销毁/状态维护)                        │  │ │
-│  │  └─────────────────────────────────────────────────────┘  │ │
-│  │                            │                              │ │
-│  │          ┌─────────────────┼─────────────────┐            │ │
-│  │          ▼                 ▼                 ▼            │ │
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │ │
-│  │  │ AgentInstance│  │ AgentInstance│  │ AgentInstance│     │ │
-│  │  │    #1        │  │    #2        │  │    #3        │     │ │
-│  │  │  ┌────────┐  │  │  ┌────────┐  │  │  ┌────────┐  │     │ │
-│  │  │  │AgentLoop│ │  │  │AgentLoop│ │  │  │AgentLoop│ │     │ │
-│  │  │  └────┬───┘  │  │  └────┬───┘  │  │  └────┬───┘  │     │ │
-│  │  └───────┼──────┘  └───────┼──────┘  └───────┼──────┘     │ │
-│  │          │                 │                 │            │ │
-│  └──────────┼─────────────────┼─────────────────┼────────────┘ │
-│             │                 │                 │              │
-│             └─────────────────┼─────────────────┘              │
-│                               │                                │
-│                               ▼                                │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │                    Tool Registry                          │ │
-│  │  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │ │
-│  │  │ Search  │ │  File   │ │  Shell  │ │ Custom  │ ...      │ │
-│  │  └─────────┘ └─────────┘ └─────────┘ └─────────┘          │ │
-│  └───────────────────────────────────────────────────────────┘ │
-│                               │                                │
-│                               ▼                                │
-│  ┌───────────────────────────────────────────────────────────┐ │
-│  │                   LLM Providers                           │ │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │ │
-│  │  │  Anthropic  │  │   OpenAI    │  │   Qwen      │        │ │
-│  │  │  (Claude)   │  │   (GPT)     │  │ (Aliyun)    │        │ │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘        │ │
-│  └───────────────────────────────────────────────────────────┘ │
-└────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        用户交互层                                │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │
+│  │Telegram │ │Discord  │ │ Feishu  │ │ Slack   │ │ 更多... │   │
+│  └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘ └────┬────┘   │
+└───────┼──────────┼──────────┼──────────┼──────────┼────────────┘
+        │          │          │          │          │
+        └──────────┴────┬─────┴──────────┴──────────┘
+                        │
+        ┌───────────────▼───────────────┐
+        │      channels.Manager         │  ← 通道管理
+        │   (统一消息抽象层)             │
+        └───────────────┬───────────────┘
+                        │
+        ┌───────────────▼───────────────┐
+        │         bus.MessageBus        │  ← 消息总线
+        │    ( inbound / outbound )     │
+        └───────────────┬───────────────┘
+                        │
+        ┌───────────────▼───────────────┐
+        │        agent.AgentLoop        │  ← 核心执行循环
+        │  ┌─────────────────────────┐  │
+        │  │   AgentRegistry         │  │  ← 多 Agent 管理
+        │  │  ┌───────────────────┐  │  │
+        │  │  │ AgentInstance     │  │  │  ← 单个 Agent 实例
+        │  │  │ - Tools           │  │  │
+        │  │  │ - Sessions        │  │  │
+        │  │  │ - ContextBuilder  │  │  │
+        │  │  └───────────────────┘  │  │
+        │  └─────────────────────────┘  │
+        └───────────────┬───────────────┘
+                        │
+        ┌───────────────▼───────────────┐
+        │      providers.LLMProvider    │  ← LLM 提供商适配
+        │   (OpenAI / Claude / Ollama)  │
+        └───────────────────────────────┘
 ```
 
 ---
 
-## 🔧 核心组件
+## 📦 核心组件
 
-### 1. Gateway（网关）
+### 1. Gateway (`pkg/gateway/gateway.go`)
 
-**职责**: 多通道集成服务器
+Gateway 是 PicoClaw 的入口服务，负责：
+- 配置加载与热更新
+- 服务启动与关闭
+- Agent 生命周期管理
+
+**关键函数：**
+```go
+// 启动 Gateway
+func Run(debug bool, homePath, configPath string, allowEmptyStartup bool) error
+
+// 设置服务
+func setupAndStartServices(cfg, agentLoop, msgBus, authToken) (*services, error)
+
+// 配置热更新
+func handleConfigReload(ctx, agentLoop, newCfg, provider, runningServices, msgBus) error
+```
+
+**启动流程：**
+1. 加载配置文件
+2. 创建 LLM Provider
+3. 初始化 AgentLoop
+4. 启动通道服务（Telegram、Discord 等）
+5. 启动辅助服务（Cron、Heartbeat、Device）
+6. 进入事件循环等待信号
+
+---
+
+### 2. MessageBus (`pkg/bus/`)
+
+消息总线是内部通信的核心：
 
 ```go
-// 核心功能
-type Gateway struct {
-    server      *http.Server      // HTTP 服务器
-    channels    map[string]Channel // 已注册的通道
-    instances   map[string]*AgentInstance // 会话实例
+type MessageBus interface {
+    InboundChan() <-chan InboundMessage   // 接收外部消息
+    OutboundChan() <-chan OutboundMessage // 发送响应消息
+    PublishInbound(ctx, InboundMessage)   // 发布入站消息
+    PublishOutbound(ctx, OutboundMessage) // 发布出站消息
 }
-
-// 主要方法
-func (g *Gateway) Start()                    // 启动服务器
-func (g *Gateway) RegisterChannel(c Channel) // 注册通道
-func (g *Gateway) routeMessage(msg Message)  // 消息路由
 ```
 
-**关键特性**:
-- 支持 WebSocket 和 HTTP 长轮询
-- 消息格式统一转换
-- 会话路由和负载均衡
-- 健康检查端点 (`/health`)
+**消息流向：**
+```
+外部平台 → Channel → MessageBus.Inbound → AgentLoop → LLM
+                                                    ↓
+外部平台 ← Channel ← MessageBus.Outbound ← AgentLoop ← Tool
+```
 
 ---
 
-### 2. AgentInstance（代理实例）
+### 3. Channels (`pkg/channels/`)
 
-**职责**: 单个会话的生命周期管理
+通道管理器统一处理不同平台的接入：
+
+**支持的通道：**
+- 即时通讯：Telegram、Discord、Slack、WhatsApp
+- 国内平台：飞书、钉钉、企业微信、QQ
+- 其他：IRC、Matrix、Line、VK
+
+**通道接口：**
+```go
+type Channel interface {
+    Start(ctx context.Context) error
+    Stop(ctx context.Context) error
+    Send(ctx, chatID, content string) error
+}
+
+// 可选能力
+type ReactionCapable interface {
+    ReactToMessage(ctx, chatID, messageID string) (string, error)
+}
+```
+
+**管理器：**
+```go
+// pkg/channels/manager.go
+type Manager struct {
+    channels map[string]Channel
+    msgBus   *bus.MessageBus
+}
+
+func (m *Manager) StartAll(ctx) error
+func (m *Manager) StopAll(ctx) error
+func (m *Manager) GetChannel(name string) (Channel, bool)
+```
+
+---
+
+### 4. AgentLoop (`pkg/agent/loop.go`)
+
+核心执行循环，处理 AI 对话的完整流程：
+
+**数据结构：**
+```go
+type AgentLoop struct {
+    // 核心依赖
+    bus      *bus.MessageBus
+    cfg      *config.Config
+    registry *AgentRegistry
+    state    *state.Manager
+    
+    // 事件系统
+    eventBus *EventBus
+    hooks    *HookManager
+    
+    // 运行时状态
+    running        atomic.Bool
+    contextManager ContextManager
+    fallback       *providers.FallbackChain
+    channelManager *channels.Manager
+    mediaStore     media.MediaStore
+}
+```
+
+**主循环：**
+```go
+func (al *AgentLoop) Run(ctx context.Context) error {
+    al.running.Store(true)
+    
+    for {
+        select {
+        case <-ctx.Done():
+            return nil
+        case msg, ok := <-al.bus.InboundChan():
+            // 处理入站消息
+            response, err := al.processMessage(ctx, msg)
+            // 发布响应
+            al.PublishResponseIfNeeded(ctx, channel, chatID, response)
+        }
+    }
+}
+```
+
+**消息处理流程：**
+1. 接收消息 → 2. 解析会话 → 3. 构建上下文 → 4. 调用 LLM → 5. 执行工具 → 6. 返回结果
+
+---
+
+### 5. AgentRegistry (`pkg/agent/registry.go`)
+
+多 Agent 管理器：
+
+```go
+type AgentRegistry struct {
+    agents   map[string]*AgentInstance  // Agent 实例映射
+    resolver *routing.RouteResolver    // 路由解析器
+    mu       sync.RWMutex
+}
+
+func (r *AgentRegistry) GetAgent(agentID string) (*AgentInstance, bool)
+func (r *AgentRegistry) ListAgentIDs() []string
+func (r *AgentRegistry) CanSpawnSubagent(parent, target string) bool
+```
+
+**功能：**
+- 从配置创建多个 Agent 实例
+- 消息路由到正确的 Agent
+- 管理 SubAgent 生成权限
+
+---
+
+### 6. AgentInstance (`pkg/agent/instance.go`)
+
+单个 Agent 的完整配置：
 
 ```go
 type AgentInstance struct {
-    id          string           // 会话 ID
-    config      AgentConfig      // 配置
-    loop        *AgentLoop       // 执行引擎
-    context     Context          // 上下文
-    state       State            // 状态
-    messageHistory []Message     // 消息历史
-}
-
-// 主要方法
-func NewAgentInstance(config Config) *AgentInstance  // 创建实例
-func (a *AgentInstance) ProcessMessage(msg Message)  // 处理消息
-func (a *AgentInstance) GetContext() Context         // 获取上下文
-func (a *AgentInstance) Close()                       // 关闭实例
-```
-
-**关键特性**:
-- 独立的上下文维护
-- 消息历史管理
-- 资源清理
-
----
-
-### 3. AgentLoop（代理循环）
-
-**职责**: LLM 调用和工具执行的核心循环
-
-```go
-type AgentLoop struct {
-    llm           LLMProvider      // LLM 提供商
-    tools         *ToolRegistry    // 工具注册表
-    maxIterations int              // 最大迭代次数
-}
-
-// 核心方法
-func (a *AgentLoop) Run(input Message) Response {
-    messages := []Message{input}
+    ID            string
+    Model         string
+    Workspace     string
+    MaxIterations int
+    MaxTokens     int
+    Temperature   float64
     
-    for iteration := 0; iteration < a.maxIterations; iteration++ {
-        // 1. 调用 LLM
-        response := a.llm.Call(messages, a.tools.Definitions())
-        
-        // 2. 检查是否有工具调用
-        if len(response.ToolCalls) == 0 {
-            return response // 返回最终答案
-        }
-        
-        // 3. 执行工具
-        for _, toolCall := range response.ToolCalls {
-            result := a.tools.Execute(toolCall)
-            messages = append(messages, result.ToMessage())
-        }
-    }
+    Provider      providers.LLMProvider
+    Sessions      session.SessionStore
+    ContextBuilder *ContextBuilder
+    Tools         *tools.ToolRegistry
     
-    return Response{Error: "max iterations reached"}
+    // 模型路由
+    Router          *routing.Router
+    LightCandidates []providers.FallbackCandidate
 }
 ```
 
-**执行流程**:
-```
-输入消息
-    │
-    ▼
-┌─────────────┐
-│  调用 LLM   │
-│ (消息 + 工具)│
-└──────┬──────┘
-       │
-       ▼
-  有工具调用？
-   ╱     ╲
-  否      是
-  │       │
-  │       ▼
-  │  ┌─────────────┐
-  │  │  执行工具   │
-  │  └──────┬──────┘
-  │         │
-  │         ▼
-  │    添加结果到消息
-  │         │
-  └────────┘
-       │
-       ▼
-  达到最大迭代？
-   ╱     ╲
-  是      否
-  │       │
-  ▼       └──→ 继续循环
-返回结果
-```
-
----
-
-### 4. ToolRegistry（工具注册表）
-
-**职责**: 工具的注册、发现和執行
-
-```go
-// 工具接口
-type Tool interface {
-    Name() string
-    Description() string
-    Parameters() map[string]ParameterSchema
-    Execute(ctx Context, params map[string]any) (Result, error)
-}
-
-// 注册表
-type ToolRegistry struct {
-    mu    sync.RWMutex          // 并发控制
-    tools map[string]Tool       // 工具映射
-}
-
-// 主要方法
-func (t *ToolRegistry) Register(tool Tool)           // 注册工具
-func (t *ToolRegistry) Get(name string) Tool         // 获取工具
-func (t *ToolRegistry) Definitions() []ToolDef       // 获取 LLM 工具定义
-func (t *ToolRegistry) Execute(call ToolCall) Result // 执行工具
-```
-
-**内置工具**:
-- `search` - 网络搜索
-- `file_read` - 文件读取
-- `file_write` - 文件写入
-- `shell` - 命令执行
-- `http_request` - HTTP 请求
+**工具注册：**
+- 文件操作：`read_file`, `write_file`, `edit_file`, `list_dir`
+- 系统操作：`exec`
+- 网络操作：`web`, `web_fetch`
+- 通讯操作：`message`, `send_file`, `reaction`
+- 扩展功能：`spawn`, `skills`, `cron`
 
 ---
 
 ## 🔄 数据流
 
-### 一次完整请求的处理流程
+### 完整请求处理流程
 
 ```
-1. 用户发送消息 (Telegram/Discord/HTTP)
-         │
-         ▼
-2. Gateway 接收并转换格式
-         │
-         ▼
-3. 查找/创建 AgentInstance
-         │
-         ▼
-4. AgentInstance 调用 AgentLoop.Run()
-         │
-         ▼
-5. AgentLoop 执行循环:
-   ┌──────────────────────────────┐
-   │ 5.1 调用 LLM (消息 + 工具定义) │
-   │         │                    │
-   │         ▼                    │
-   │ 5.2 解析响应                 │
-   │         │                    │
-   │    有工具调用？───否──→ 返回结果
-   │         │ 是                 │
-   │         ▼                    │
-   │ 5.3 执行工具                 │
-   │         │                    │
-   │         ▼                    │
-   │ 5.4 添加结果到消息历史        │
-   │         │                    │
-   │         └──────→ 继续循环    │
-   └──────────────────────────────┘
-         │
-         ▼
-6. 返回最终响应给用户
+1. 用户发送消息 (Telegram)
+       ↓
+2. Telegram Channel 接收
+       ↓
+3. 转换为统一格式 (providers.Message)
+       ↓
+4. 发布到 MessageBus.Inbound
+       ↓
+5. AgentLoop 接收消息
+       ↓
+6. 解析路由 (哪个 Agent 处理)
+       ↓
+7. 加载会话历史 (SessionStore)
+       ↓
+8. 构建上下文 (ContextBuilder)
+       ↓
+9. 调用 LLM Provider
+       ↓
+10. 解析响应（文本 or 工具调用）
+       ↓
+    ┌──────────────┴──────────────┐
+    │                             │
+    ↓                             ↓
+11a. 文本响应                  11b. 工具调用
+    │                             │
+    │                    ┌────────┴────────┐
+    │                    │                 │
+    │                    ↓                 ↓
+    │             执行工具           并行执行多工具
+    │                    │                 │
+    │                    └────────┬────────┘
+    │                             │
+    │                    ┌────────▼────────┐
+    │                    │   结果收集      │
+    │                    └────────┬────────┘
+    │                             │
+    └──────────────┬──────────────┘
+                   │
+12. 合成最终响应 ←─┘
+       ↓
+13. 发布到 MessageBus.Outbound
+       ↓
+14. Channel 发送回用户
 ```
 
 ---
 
-## 🎨 设计哲学
+## 📁 目录结构
 
-### 1. 极简主义 (Minimalism)
-
-> "代码量控制在 OpenClaw 的 1%"
-
-- 去掉所有不必要的抽象层
-- 直接使用标准库（`net/http`, `encoding/json`）
-- 避免过度工程化
-
-### 2. 本地优先 (Local-First)
-
-> "可在无网络环境下运行（配合本地 LLM）"
-
-- 支持本地 LLM（Ollama、LM Studio）
-- 本地状态持久化
-- 离线可用
-
-### 3. 实用主义 (Pragmatism)
-
-> "去掉 LangChain 等抽象层，直接调用 API"
-
-- 直接 HTTP 调用 LLM API
-- 简单的接口定义
-- 易于调试和理解
-
-### 4. 嵌入式友好 (Embedded-Friendly)
-
-> "运行在 $10 的 RISC-V 开发板上"
-
-- 低内存占用 (< 10MB)
-- 快速启动 (< 1 秒)
-- 交叉编译支持
-
----
-
-## 📊 性能指标
-
-| 指标 | PicoClaw | OpenClaw | 提升 |
-|------|----------|----------|------|
-| 启动时间 | < 1s | ~540s | 540x |
-| 内存占用 | < 10MB | ~1500MB | 150x |
-| 二进制大小 | ~5MB | ~200MB (node_modules) | 40x |
-| CPU 需求 | 0.6GHz | 2.0GHz+ | 3x |
-
----
-
-## 🔍 关键代码位置
-
-| 组件 | 文件路径 | 行数 |
-|------|---------|------|
-| AgentLoop | `pkg/agent/loop.go` | ~200 |
-| AgentInstance | `pkg/agent/instance.go` | ~150 |
-| ToolRegistry | `pkg/tools/registry.go` | ~100 |
-| Gateway | `cmd/gateway/main.go` | ~300 |
-| **总计** | | **~750** |
-
----
-
-## 📝 学习要点
-
-### 重点理解
-1. AgentLoop 的循环逻辑
-2. 工具调用的解析和执行
-3. 消息格式的统一转换
-4. 并发控制和资源管理
-
-### 难点突破
-1. 多通道消息格式差异处理
-2. 流式响应的实现
-3. 会话状态的持久化
-4. 错误处理和恢复
+```
+picoclaw/
+├── cmd/
+│   ├── picoclaw/                    # 主程序入口
+│   │   └── internal/
+│   │       ├── agent/               # Agent 命令
+│   │       ├── gateway/             # Gateway 命令
+│   │       ├── auth/                # 认证命令
+│   │       ├── skills/              # 技能管理
+│   │       └── cron/                # 定时任务
+│   └── picoclaw-launcher-tui/       # TUI 启动器
+│
+├── pkg/
+│   ├── agent/                       # 核心 Agent 逻辑
+│   │   ├── loop.go                  # 主循环
+│   │   ├── instance.go              # Agent 实例
+│   │   ├── registry.go              # Agent 注册表
+│   │   ├── context.go               # 上下文管理
+│   │   ├── tools.go                 # 工具执行
+│   │   └── events.go                # 事件系统
+│   │
+│   ├── channels/                    # 通道实现
+│   │   ├── manager.go               # 通道管理
+│   │   ├── base.go                  # 基础通道
+│   │   ├── telegram/                # Telegram
+│   │   ├── discord/                 # Discord
+│   │   ├── feishu/                  # 飞书
+│   │   └── ...                      # 其他通道
+│   │
+│   ├── providers/                   # LLM 提供商
+│   │   ├── interface.go             # Provider 接口
+│   │   ├── openai/                  # OpenAI
+│   │   ├── ollama/                  # Ollama
+│   │   └── fallback.go              # 降级链
+│   │
+│   ├── tools/                       # 工具实现
+│   │   ├── registry.go              # 工具注册
+│   │   ├── file.go                  # 文件工具
+│   │   ├── web.go                   # 网络工具
+│   │   ├── exec.go                  # 执行工具
+│   │   └── spawn.go                 # 子 Agent 工具
+│   │
+│   ├── gateway/                     # Gateway 服务
+│   │   ├── gateway.go               # 主服务
+│   │   └── channel_matrix.go        # 通道矩阵
+│   │
+│   ├── bus/                         # 消息总线
+│   ├── config/                      # 配置管理
+│   ├── session/                     # 会话存储
+│   ├── memory/                      # 记忆管理
+│   ├── state/                       # 状态管理
+│   ├── media/                       # 媒体文件
+│   └── logger/                      # 日志系统
+│
+├── docs/                            # 文档
+├── examples/                        # 示例
+└── web/                             # Web UI
+```
 
 ---
 
-**下一篇**: [02-核心组件.md](02-core-components.md)
+## 🎯 设计特点
 
-最后更新：2026-03-29
+### 1. 超轻量设计
+- 单一二进制文件
+- 无外部依赖（除 LLM API）
+- 内存占用低（适合边缘设备）
+
+### 2. 模块化架构
+- 通道插件化（import _ 自动注册）
+- 工具可扩展
+- 多 Agent 支持
+
+### 3. 高可用性
+- 配置热更新（无需重启）
+- 优雅关闭
+- 多 Provider 降级链
+
+### 4. 安全性
+- 工作空间限制
+- 路径白名单
+- 敏感信息加密
+
+---
+
+## 📊 与 OpenClaw 对比
+
+| 特性 | PicoClaw | OpenClaw |
+|------|----------|----------|
+| 定位 | 嵌入式/边缘设备 | 企业级应用 |
+| 语言 | Go | Python |
+| 部署 | 单二进制 | Docker/源码 |
+| 多 Agent | 支持（SubAgent） | 完整 Teams |
+| 通道 | 20+ | 10+ |
+| 内存占用 | ~50MB | ~200MB+ |
+
+---
+
+**最后更新**: 2026-04-08  
+**基于版本**: PicoClaw v1.x (GitHub main branch)

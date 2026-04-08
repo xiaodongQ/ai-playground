@@ -1,6 +1,6 @@
 # PicoClaw 学习路径规划
 
-> 🗺️ 从零到精通的系统化学习路线
+> 🗺️ 基于实际源码的学习路线（2026 年版本）
 
 ---
 
@@ -10,19 +10,19 @@
 Week 1: 基础理解                    Week 2: 源码精读
 ┌─────────────────────┐           ┌─────────────────────┐
 │ Day 1-2: 架构概览    │           │ Day 8-9: AgentLoop  │
-│ - 定位与特点         │           │ - 执行循环详解      │
-│ - 核心组件           │           │ - 迭代控制          │
-│ - 与 OpenClaw 对比   │           │ - 工具调用处理      │
+│ - 项目定位与特点     │           │ - 主循环结构        │
+│ - 核心组件           │           │ - 消息处理流程      │
+│ - 与 OpenClaw 对比   │           │ - 工具调用机制      │
 ├─────────────────────┤           ├─────────────────────┤
-│ Day 3-4: 组件深入    │           │ Day 10-11: Gateway  │
-│ - AgentInstance     │           │ - 多通道集成        │
-│ - ToolRegistry      │           │ - 消息路由          │
-│ - Provider 适配      │           │ - 认证与限流        │
+│ Day 3-4: 组件深入    │           │ Day 10-11: Registry │
+│ - AgentLoop         │           │ - 多 Agent 管理       │
+│ - AgentInstance     │           │ - 路由解析          │
+│ - ToolRegistry      │           │ - SubAgent 机制      │
 ├─────────────────────┤           ├─────────────────────┤
-│ Day 5-7: 执行流程    │           │ Day 12-14: 扩展开发 │
-│ - 消息处理链路       │           │ - 自定义工具        │
-│ - 工具调用机制       │           │ - 新通道适配        │
-│ - 状态管理          │           │ - 性能优化          │
+│ Day 5-7: 数据流     │            │ Day 12-14: Gateway  │
+│ - MessageBus        │            │ - 服务启动流程      │
+│ - Channels 管理      │            │ - 配置热更新        │
+│ - Provider 适配      │            │ - 通道集成          │
 └─────────────────────┘           └─────────────────────┘
 ```
 
@@ -38,45 +38,72 @@ Week 1: 基础理解                    Week 2: 源码精读
 - [ ] 搭建本地开发环境
 - [ ] 运行 Hello World 示例
 
+**关键文件**:
+- `README.md` - 项目介绍
+- `ROADMAP.md` - 开发路线图
+- `docs/configuration.md` - 配置说明
+
 **产出**: [notes/01-architecture.md](notes/01-architecture.md)
 
 #### Day 2: 架构解析
 - [ ] 绘制整体架构图
-- [ ] 理解四大核心组件
+- [ ] 理解核心组件职责
 - [ ] 分析组件间依赖关系
 - [ ] 了解数据流向
+
+**关键文件**:
+- `pkg/gateway/gateway.go` - 服务入口
+- `pkg/bus/message_bus.go` - 消息总线
+- `pkg/channels/manager.go` - 通道管理
 
 **产出**: 架构图（diagrams/architecture.png）
 
 #### Day 3-4: 核心组件深入
-- [ ] **AgentInstance**: 会话生命周期管理
-  - 初始化流程
-  - 上下文维护
-  - 资源清理
-  
-- [ ] **ToolRegistry**: 工具注册与发现
-  - 接口定义
-  - 注册机制
-  - 执行调度
 
-- [ ] **Provider**: LLM 提供商适配
-  - 接口抽象
-  - 多提供商支持
-  - 配置管理
+- [ ] **AgentLoop**: 执行循环
+  - 主循环结构
+  - 消息处理流程
+  - 事件系统
+  
+- [ ] **AgentInstance**: Agent 实例
+  - 初始化流程
+  - 工具注册
+  - 会话管理
+
+- [ ] **ToolRegistry**: 工具注册与发现
+  - 工具接口定义
+  - 内置工具实现
+  - 自定义工具扩展
+
+**关键文件**:
+- `pkg/agent/loop.go`
+- `pkg/agent/instance.go`
+- `pkg/agent/registry.go`
+- `pkg/tools/registry.go`
 
 **产出**: [notes/02-core-components.md](notes/02-core-components.md)
 
-#### Day 5-7: 执行流程
-- [ ] **AgentLoop 执行循环**
-  - 消息处理流程
-  - LLM 调用逻辑
-  - 工具调用解析
-  - 结果合成
+#### Day 5-7: 数据流分析
 
-- [ ] **状态管理**
-  - 会话状态持久化
-  - 上下文窗口管理
-  - 迭代次数控制
+- [ ] **MessageBus**: 消息总线
+  - Inbound 消息流
+  - Outbound 消息流
+  - 发布订阅机制
+
+- [ ] **Channels**: 通道管理
+  - 通道接口定义
+  - 通道注册机制
+  - 消息转换逻辑
+
+- [ ] **Provider**: LLM 适配层
+  - Provider 接口
+  - 降级链实现
+  - 限流机制
+
+**关键文件**:
+- `pkg/bus/`
+- `pkg/channels/`
+- `pkg/providers/`
 
 **产出**: [notes/03-execution-flow.md](notes/03-execution-flow.md)
 
@@ -85,70 +112,60 @@ Week 1: 基础理解                    Week 2: 源码精读
 ### 第二阶段：源码精读（Day 8-14）
 
 #### Day 8-9: AgentLoop 源码分析
-```go
-// 重点文件：pkg/agent/loop.go
 
-// 1. 主循环结构
-func (a *AgentLoop) Run(input Message) Response
-
-// 2. LLM 调用逻辑
-func (a *AgentLoop) callLLM(messages []Message) Response
-
-// 3. 工具执行
-func (a *AgentLoop) executeTools(toolCalls []ToolCall) []Result
-
-// 4. 迭代控制
-func (a *AgentLoop) shouldContinue() bool
-```
+**重点文件**: `pkg/agent/loop.go`
 
 **分析要点**:
-- [ ] 循环终止条件
-- [ ] 错误处理机制
-- [ ] 性能优化点
+- [ ] 主循环结构
+  ```go
+  func (al *AgentLoop) Run(ctx context.Context) error
+  ```
+- [ ] 消息处理
+  ```go
+  func (al *AgentLoop) processMessage(ctx, msg) (string, error)
+  ```
+- [ ] 工具执行循环
+  ```go
+  func (al *AgentLoop) RunToolLoop(ctx, turnState, agent) (string, error)
+  ```
+- [ ] 并发控制机制
 
 **产出**: [src-analysis/agent-loop.md](src-analysis/agent-loop.md)
 
-#### Day 10-11: AgentInstance 源码分析
-```go
-// 重点文件：pkg/agent/instance.go
+#### Day 10-11: AgentRegistry 源码分析
 
-// 1. 实例初始化
-func NewAgentInstance(config Config) *AgentInstance
-
-// 2. 上下文管理
-func (a *AgentInstance) GetContext() Context
-
-// 3. 生命周期
-func (a *AgentInstance) Start()
-func (a *AgentInstance) Stop()
-```
+**重点文件**: `pkg/agent/registry.go`
 
 **分析要点**:
-- [ ] 资源管理
-- [ ] 并发控制
-- [ ] 状态机设计
+- [ ] 多 Agent 管理
+  ```go
+  type AgentRegistry struct {
+      agents   map[string]*AgentInstance
+      resolver *routing.RouteResolver
+  }
+  ```
+- [ ] 路由解析机制
+- [ ] SubAgent 权限控制
 
-**产出**: [src-analysis/agent-instance.md](src-analysis/agent-instance.md)
+**产出**: [src-analysis/agent-registry.md](src-analysis/agent-registry.md)
 
 #### Day 12-14: Gateway 源码分析
-```go
-// 重点文件：cmd/gateway/main.go
-//            pkg/gateway/server.go
 
-// 1. 服务器启动
-func StartGateway(config GatewayConfig)
-
-// 2. 通道注册
-func (g *Gateway) RegisterChannel(name string, handler ChannelHandler)
-
-// 3. 消息路由
-func (g *Gateway) routeMessage(msg Message)
-```
+**重点文件**: `pkg/gateway/gateway.go`
 
 **分析要点**:
-- [ ] HTTP 服务器实现
-- [ ] WebSocket 处理
-- [ ] 认证与限流
+- [ ] 服务启动流程
+  ```go
+  func Run(debug bool, homePath, configPath string, allowEmptyStartup) error
+  ```
+- [ ] 配置热更新
+  ```go
+  func handleConfigReload(ctx, agentLoop, newCfg, provider, ...) error
+  ```
+- [ ] 服务管理
+  - Cron 服务
+  - Heartbeat 服务
+  - 通道管理
 
 **产出**: [src-analysis/gateway.md](src-analysis/gateway.md)
 
@@ -157,16 +174,35 @@ func (g *Gateway) routeMessage(msg Message)
 ### 第三阶段：实践应用（Day 15-21）
 
 #### Day 15-17: 自定义工具开发
+
+**示例**: 自定义天气工具
+
 ```go
-// 示例：自定义天气工具
 type WeatherTool struct {
     apiKey string
 }
 
-func (w *WeatherTool) Name() string { return "weather" }
+func (w *WeatherTool) Name() string { 
+    return "weather" 
+}
 
-func (w *WeatherTool) Execute(ctx Context, params map[string]any) (Result, error) {
+func (w *WeatherTool) Definition() tools.ToolDefinition {
+    return tools.ToolDefinition{
+        Name:        "weather",
+        Description: "查询天气信息",
+        Parameters:  jsonschema.Schema{...},
+    }
+}
+
+func (w *WeatherTool) Execute(ctx context.Context, params map[string]any) (*tools.ToolResult, error) {
     // 实现逻辑
+    city := params["city"].(string)
+    // 调用天气 API...
+    return &tools.ToolResult{
+        Content: fmt.Sprintf("%s 的天气：晴，25°C", city),
+        ForLLM:  "weather_result",
+        ForUser: "今天天气晴朗，气温 25°C",
+    }, nil
 }
 ```
 
@@ -178,58 +214,12 @@ func (w *WeatherTool) Execute(ctx Context, params map[string]any) (Result, error
 **产出**: [examples/custom-tool.go](examples/custom-tool.go)
 
 #### Day 18-21: 多 Agent 协作
-- [ ] 理解 Agent Teams 架构
-- [ ] 实现简单多 Agent 示例
+
+- [ ] 理解 SubAgent 架构
+- [ ] 配置多 Agent 示例
 - [ ] 测试协作效果
 
 **产出**: [examples/multi-agent.md](examples/multi-agent.md)
-
----
-
-### 第四阶段：扩展开发（可选）
-
-#### 新通道适配
-- [ ] 学习现有通道实现（Telegram/Discord）
-- [ ] 适配新通道（如飞书）
-- [ ] 提交 PR
-
-#### 性能优化
-- [ ] 性能分析（pprof）
-- [ ] 识别瓶颈
-- [ ] 优化实现
-
-#### 文档贡献
-- [ ] 补充中文文档
-- [ ] 添加示例代码
-- [ ] 修复文档错误
-
----
-
-## 📝 学习方法建议
-
-### 1. 代码阅读技巧
-```bash
-# 使用工具辅助
-go doc pkg/agent/loop.go        # 查看文档
-go test -v ./pkg/agent/...      # 运行测试
-go build -o picoclaw .          # 编译验证
-```
-
-### 2. 调试技巧
-```bash
-# 启用详细日志
-export PICOCLAW_LOG_LEVEL=debug
-picoclaw gateway --debug
-
-# 使用 delve 调试
-dlv debug ./cmd/gateway
-```
-
-### 3. 笔记记录
-- 每个模块创建一个笔记文件
-- 记录关键代码片段
-- 绘制流程图辅助理解
-- 记录疑问和发现
 
 ---
 
@@ -238,7 +228,7 @@ dlv debug ./cmd/gateway
 ### 基础理解阶段
 - [ ] 能清晰解释 PicoClaw 的定位
 - [ ] 能画出完整架构图
-- [ ] 能说明四大组件的职责
+- [ ] 能说明核心组件的职责
 - [ ] 能描述一次完整请求的处理流程
 
 ### 源码精读阶段
@@ -265,10 +255,20 @@ dlv debug ./cmd/gateway
 ### 补充阅读
 - [Go 最佳实践](https://golang.org/doc/effective_go)
 - [LLM Agent 架构论文](https://arxiv.org/abs/2308.11432)
-- [OpenClaw 架构对比](references/comparisons.md)
+
+---
+
+## 📋 学习笔记索引
+
+| 笔记 | 内容 | 状态 |
+|------|------|------|
+| [01-架构解析](notes/01-architecture.md) | 整体架构、设计理念 | ✅ 完成 |
+| [02-核心组件](notes/02-core-components.md) | 核心模块详解 | ✅ 完成 |
+| [03-执行流程](notes/03-execution-flow.md) | 消息处理、工具调用 | ✅ 完成 |
 
 ---
 
 **开始学习吧！** 🚀
 
-最后更新：2026-03-29
+最后更新：2026-04-08  
+基于版本：PicoClaw v1.x (GitHub main branch)
