@@ -1,18 +1,5 @@
-# Python
+data/tasks.db
 __pycache__/
-*.py[cod]
-*.so
-
-# Database
-*.db
-
-# Workspace (task execution)
-workspace/
-
-# Environment
-.env
-
-# IDE
-.vscode/
-.idea/
-*.swp
+*.pyc
+.pytest_cache/
+data/tasks.db
