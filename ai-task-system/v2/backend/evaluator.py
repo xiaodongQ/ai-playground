@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Dict
 from openai import OpenAI
@@ -53,7 +54,8 @@ class Evaluator:
             task_description, execution_output, original_requirements, iteration_count
         )
 
-        response = self.client.chat.completions.create(
+        response = await asyncio.to_thread(
+            self.client.chat.completions.create,
             model=model,
             messages=[{"role": "user", "content": prompt}]
         )
