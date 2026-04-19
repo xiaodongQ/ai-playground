@@ -1,11 +1,28 @@
 import difflib
+import os
+import yaml
+from pathlib import Path as _Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
 from backend.database import Database
 
 router = APIRouter()
-db = Database()
+
+# Load config.yaml for database path
+_CONFIG_PATH = _Path(__file__).parent.parent.parent / "config.yaml"
+_config = {
+    "database": {"path": "data/tasks.db"},
+    "evaluator": {"default_model": "gpt-4o"},
+}
+if _CONFIG_PATH.exists():
+    with open(_CONFIG_PATH) as f:
+        _config = yaml.safe_load(f)
+
+# Get db_path from config
+_db_path = _config.get("database", {}).get("path", "data/tasks.db")
+db = Database(db_path=_db_path)
+
 
 class TaskCreate(BaseModel):
     title: str

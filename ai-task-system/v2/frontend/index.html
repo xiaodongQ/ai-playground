@@ -83,6 +83,8 @@
                         <div class="flex gap-2">
                             <button onclick="loadTasks('all')"
                                 class="px-3 py-1 rounded text-sm bg-gray-200 hover:bg-gray-300">全部</button>
+                            <button onclick="loadTasks('waiting')"
+                                class="px-3 py-1 rounded text-sm bg-indigo-100 hover:bg-indigo-200">等待依赖</button>
                             <button onclick="loadTasks('pending')"
                                 class="px-3 py-1 rounded text-sm bg-yellow-100 hover:bg-yellow-200">待执行</button>
                             <button onclick="loadTasks('running')"
@@ -117,12 +119,27 @@
     const API_BASE = '/api';
 
     // WebSocket for live task updates
+    const SESSION_KEY = 'ai_task_session_id';
+    let wsSessionId = localStorage.getItem(SESSION_KEY) || null;
     let ws = null;
+
     function connectWS() {
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+        ws.onopen = () => {
+            // Send init message with existing session_id for reconnect detection
+            if (wsSessionId) {
+                ws.send(JSON.stringify({type: 'init', client_id: wsSessionId}));
+            }
+        };
+
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
+            if (data.type === 'session_assigned') {
+                wsSessionId = data.session_id;
+                localStorage.setItem(SESSION_KEY, wsSessionId);
+            }
             if (data.type === 'task_update') {
                 updateTaskStatus(data.task_id, data.status);
             }
@@ -130,6 +147,13 @@
         ws.onclose = () => setTimeout(connectWS, 3000);
         ws.onerror = () => ws.close();
     }
+
+    // Ping interval to keep connection alive
+    setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({type: 'ping'}));
+        }
+    }, 30000);
 
     function updateTaskStatus(taskId, status) {
         const card = document.querySelector(`[data-task-id="${taskId}"]`);
@@ -154,7 +178,8 @@
             'evaluated': '已完成',
             're-execute': '待重试',
             'failed': '失败',
-            'cancelled': '已取消'
+            'cancelled': '已取消',
+            'waiting': '等待依赖'
         };
         return texts[status] || status;
     }
@@ -211,7 +236,8 @@
             'evaluated': 'bg-gray-100 text-gray-800',
             're-execute': 'bg-orange-100 text-orange-800',
             'failed': 'bg-red-100 text-red-800',
-            'cancelled': 'bg-gray-200 text-gray-600'
+            'cancelled': 'bg-gray-200 text-gray-600',
+            'waiting': 'bg-indigo-100 text-indigo-800'
         };
         return classes[status] || 'bg-gray-100 text-gray-800';
     }

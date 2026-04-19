@@ -38,10 +38,24 @@ async def root():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await ws_manager.connect(websocket)
+    # Get optional client_id from first message (before connect)
+    try:
+        # Client can send {"type": "init", "client_id": "..."} before connect
+        first = await websocket.receive_text()
+        import json
+        init_data = json.loads(first) if first else {}
+        client_id = init_data.get("client_id")
+    except Exception:
+        client_id = None
+
+    await ws_manager.connect(websocket, client_id)
     try:
         while True:
-            await websocket.receive_text()
+            data = await websocket.receive_text()
+            import json
+            msg = json.loads(data)
+            if msg.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
 
