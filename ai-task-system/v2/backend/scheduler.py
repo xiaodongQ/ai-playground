@@ -10,12 +10,12 @@ from backend.artifacts import ArtifactsManager
 
 
 class Scheduler:
-    def __init__(self, poll_interval: int = 5):
+    def __init__(self, poll_interval: int = 5, executor=None):
         self.poll_interval = poll_interval
         self._running = False
         self._task = None
         self.db = Database()
-        self.executor = Executor()
+        self.executor = executor if executor is not None else Executor()
         self.evaluator = Evaluator()
         self.retry_executor = RetryExecutor(self.executor, RetryConfig())
         self.artifacts_manager = ArtifactsManager()

@@ -20,6 +20,7 @@ class SDKExecutor(BaseExecutor):
         self.cli_path = cli_path
         self._sessions: Dict[str, Any] = {}
         self._interrupt_flags: Dict[str, bool] = {}
+        self._clients: Dict[str, CodeBuddySDKClient] = {}
         self._load_sessions_from_disk()
 
     def _load_sessions_from_disk(self):
@@ -64,9 +65,8 @@ class SDKExecutor(BaseExecutor):
             logger.warning(f"Failed to save session file {fpath}: {e}")
         self._sessions[task_id] = session_data
 
-    def _build_options(self, timeout: Optional[int], task_id: str):
+    def _build_options(self, timeout: Optional[int], task_id: str) -> CodeBuddyAgentOptions:
         """构建 CodeBuddyAgentOptions，timeout 通过 request_timeout_ms 传入"""
-        from codebuddy_agent_sdk import CodeBuddyAgentOptions
         return CodeBuddyAgentOptions(
             codebuddy_code_path=self.cli_path,
             session_id=task_id,
@@ -98,7 +98,7 @@ class SDKExecutor(BaseExecutor):
         self._save_session(task_id, session_data)
 
         try:
-            from codebuddy_agent_sdk import query
+            from codebuddy_agent_sdk import CodeBuddySDKClient, CodeBuddyAgentOptions
             options = self._build_options(timeout, task_id)
 
             # SDK top-level query() returns AsyncIterator[Message]

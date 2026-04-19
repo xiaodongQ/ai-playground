@@ -13,11 +13,11 @@ class Executor:
 
         if engine == "sdk":
             self._impl: BaseExecutor = SDKExecutor(
-                cli_path=config.get("claw_path", "claw")
+                cli_path=config.get("sdk_path", "claw")
             )
         else:
             self._impl: BaseExecutor = CLIExecutor(
-                cli_command=config.get("claw_command", "claw"),
+                cli_command=config.get("cli_path", "claw"),
                 default_timeout=config.get("timeout", 600),
             )
 

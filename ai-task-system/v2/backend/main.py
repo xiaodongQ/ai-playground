@@ -23,9 +23,11 @@ from fastapi import WebSocket, WebSocketDisconnect
 from backend.api.routes import router as api_router
 from backend.scheduler import Scheduler
 from backend.websocket_manager import WebSocketManager
+from backend.executor import Executor
 
 app = FastAPI(title="AI Task System")
-scheduler = Scheduler()
+executor = Executor(config["executor"])
+scheduler = Scheduler(executor=executor)
 ws_manager = WebSocketManager()
 
 app.include_router(api_router, prefix="/api")
