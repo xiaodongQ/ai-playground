@@ -8,7 +8,7 @@ from backend.retry import RetryExecutor, RetryConfig
 
 
 class Scheduler:
-    def __init__(self, poll_interval: int = 5):
+    def __init__(self, poll_interval: int = 300):
         self.poll_interval = poll_interval
         self._running = False
         self._task = None
