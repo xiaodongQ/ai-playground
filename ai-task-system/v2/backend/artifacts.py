@@ -41,8 +41,10 @@ class Artifact:
 class ArtifactsManager:
     """管理所有 artifacts 的存储、查询和生命周期"""
 
-    def __init__(self, artifacts_dir: Path = ARTIFACTS_DIR):
+    def __init__(self, artifacts_dir: Path = ARTIFACTS_DIR, db=None, ws_manager=None):
         self.artifacts_dir = artifacts_dir
+        self.db = db
+        self.ws_manager = ws_manager
 
     def _task_dir(self, root_task_id: str, sub_task_id: str) -> Path:
         d = self.artifacts_dir / root_task_id / sub_task_id
@@ -183,6 +185,65 @@ class ArtifactsManager:
                 if meta_path.exists():
                     with open(meta_path, "w") as f:
                         json.dump(artifact.to_dict(), f, indent=2)
+        # Notify downstream tasks that this artifact is now invalid
+        self.notify_downstream_invalidation(root_task_id, artifact_id)
+
+    def notify_downstream_invalidation(self, root_task_id: str, artifact_id: str) -> List[str]:
+        """
+        When an artifact is marked invalid, find all downstream tasks that depend on it
+        and notify them. Downgrades pending tasks back to waiting.
+        Returns list of affected task IDs.
+        """
+        if not self.db:
+            return []
+
+        affected_task_ids = []
+
+        async def _do_notify():
+            nonlocal affected_task_ids
+            import sqlite3
+            # Query tasks where dependency_artifact_ids contains artifact_id
+            async with self.db._conn_lock:
+                conn = self.db._db_conn
+                cursor = await conn.execute(
+                    """SELECT id, dependency_artifact_ids FROM tasks
+                       WHERE root_task_id = ? AND (status = 'waiting' OR status = 'pending')""",
+                    (root_task_id,)
+                )
+                rows = await cursor.fetchall()
+
+            for row in rows:
+                task_id, dep_json = row[0], row[1]
+                try:
+                    deps = json.loads(dep_json or "[]")
+                except json.JSONDecodeError:
+                    deps = []
+                if artifact_id in deps:
+                    affected_task_ids.append(task_id)
+                    # Downgrade pending -> waiting
+                    await self.db.update_task_status(task_id, "waiting")
+
+            # Broadcast to WebSocket clients
+            if self.ws_manager and affected_task_ids:
+                await self.ws_manager.broadcast({
+                    "type": "artifact_invalidated",
+                    "artifact_id": artifact_id,
+                    "affected_task_ids": affected_task_ids,
+                })
+
+        # Run the async logic
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            # Already in async context — create task
+            import contextvars
+            ctx = contextvars.copy_context()
+            loop.create_task(_do_notify())
+        except RuntimeError:
+            # No running loop — run synchronously
+            asyncio.run(_do_notify())
+
+        return affected_task_ids
 
     def mark_final(self, artifact_id: str, root_task_id: str):
         """标记 artifact 为最终版本（合并验收后）"""

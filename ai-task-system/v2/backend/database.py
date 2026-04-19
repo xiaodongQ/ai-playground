@@ -38,6 +38,8 @@ class Task(BaseModel):
     result: Optional[str] = None
     feedback_md: Optional[str] = None
     priority: int = 5
+    assigned_agent: Optional[str] = None
+    is_merge: int = 0
 
 class Execution(BaseModel):
     id: str
@@ -75,6 +77,8 @@ class Database:
                 ("root_task_id", "TEXT"),
                 ("parent_task_id", "TEXT"),
                 ("dependency_artifact_ids", "TEXT DEFAULT '[]'"),
+                ("assigned_agent", "TEXT"),
+                ("is_merge", "INTEGER DEFAULT 0"),
             ]:
                 try:
                     await db.execute(f"ALTER TABLE tasks ADD COLUMN {col} {default};")
@@ -101,7 +105,9 @@ class Database:
                     priority INTEGER DEFAULT 5,
                     root_task_id TEXT,
                     parent_task_id TEXT,
-                    dependency_artifact_ids TEXT DEFAULT '[]'
+                    dependency_artifact_ids TEXT DEFAULT '[]',
+                    assigned_agent TEXT,
+                    is_merge INTEGER DEFAULT 0
                 )
             """)
 
@@ -150,26 +156,62 @@ class Database:
             await db.commit()
 
     def _row_to_task(self, row) -> Task:
-        # Handle rows that may not have priority column (existing dbs)
+        # Handle rows that may not have all columns (existing dbs)
+        # Schema: id(0), title(1), description(2), status(3), created_at(4), claimed_at(5),
+        #         started_at(6), completed_at(7), executor_model(8), evaluator_model(9),
+        #         iteration_count(10), max_iterations(11), improvement_threshold(12),
+        #         result(13), feedback_md(14), priority(15), root_task_id(16),
+        #         parent_task_id(17), dependency_artifact_ids(18), assigned_agent(19), is_merge(20)
         priority = row[15] if len(row) > 15 else 5
+        assigned_agent = row[19] if len(row) > 19 else None
+        is_merge = row[20] if len(row) > 20 else 0
         return Task(
             id=row[0], title=row[1], description=row[2], status=row[3],
             created_at=row[4], claimed_at=row[5], started_at=row[6],
             completed_at=row[7], executor_model=row[8], evaluator_model=row[9],
             iteration_count=row[10], max_iterations=row[11],
             improvement_threshold=row[12], result=row[13], feedback_md=row[14],
-            priority=priority
+            priority=priority,
+            assigned_agent=assigned_agent,
+            is_merge=is_merge
         )
 
-    async def claim_one_task(self):
+    async def claim_one_task(self, agent_id: str = None, only_merge: bool = False):
         """Atomically claim one pending task, returning None if queue is empty.
-        Uses UPDATE ... WHERE status='pending' to prevent double-claiming."""
+        Uses UPDATE ... WHERE status='pending' to prevent double-claiming.
+
+        If agent_id is provided, prioritizes tasks with assigned_agent == agent_id.
+        Falls back to generic tasks (assigned_agent IS NULL) if no affinity task found.
+
+        If only_merge=True, only claims tasks with is_merge=1."""
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute(
-                "SELECT * FROM tasks WHERE status='pending' ORDER BY priority DESC, created_at ASC LIMIT 1"
-            ) as cursor:
-                row = await cursor.fetchone()
+
+            merge_clause = " AND is_merge=1" if only_merge else ""
+
+            if agent_id:
+                # First: try to claim an agent-affinity task
+                async with db.execute(
+                    f"SELECT * FROM tasks WHERE status='pending' AND assigned_agent=?{merge_clause} "
+                    f"ORDER BY priority DESC, created_at ASC LIMIT 1",
+                    (agent_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+
+                # Fallback: generic task if no affinity task found
+                if not row:
+                    async with db.execute(
+                        f"SELECT * FROM tasks WHERE status='pending' AND assigned_agent IS NULL{merge_clause} "
+                        f"ORDER BY priority DESC, created_at ASC LIMIT 1"
+                    ) as cursor:
+                        row = await cursor.fetchone()
+            else:
+                async with db.execute(
+                    f"SELECT * FROM tasks WHERE status='pending'{merge_clause} "
+                    f"ORDER BY priority DESC, created_at ASC LIMIT 1"
+                ) as cursor:
+                    row = await cursor.fetchone()
+
             if not row:
                 return None
             task = self._row_to_task(row)

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from datetime import datetime
 from typing import Optional
 from backend.database import Database
@@ -61,8 +62,11 @@ class Scheduler:
     async def _process_pending_tasks(self):
         # Periodically check waiting tasks
         await self._update_waiting_tasks()
+        # Get current agent_id from environment (set by the agent's runtime)
+        agent_id = os.environ.get("AGENT_ID")
         # Atomically claim exactly one task per poll cycle
-        task = await self.db.claim_one_task()
+        # Agent-affinity: prefer tasks assigned to this agent, fallback to generic
+        task = await self.db.claim_one_task(agent_id=agent_id)
         if not task:
             return
         # Execute without blocking the poll loop
