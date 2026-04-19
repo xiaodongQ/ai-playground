@@ -116,6 +116,51 @@
     <script>
     const API_BASE = '/api';
 
+    // WebSocket for live task updates
+    let ws = null;
+    function connectWS() {
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${protocol}//${location.host}/ws`);
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'task_update') {
+                updateTaskStatus(data.task_id, data.status);
+            }
+        };
+        ws.onclose = () => setTimeout(connectWS, 3000);
+        ws.onerror = () => ws.close();
+    }
+
+    function updateTaskStatus(taskId, status) {
+        const card = document.querySelector(`[data-task-id="${taskId}"]`);
+        if (card) {
+            const badge = card.querySelector('.status-badge');
+            if (badge) badge.textContent = getStatusText(status);
+            if (status === 'running') badge.className = 'inline-block px-2 py-1 text-xs rounded bg-blue-100 text-blue-800';
+            if (status === 'completed') badge.className = 'inline-block px-2 py-1 text-xs rounded bg-green-100 text-green-800';
+            if (status === 'failed') badge.className = 'inline-block px-2 py-1 text-xs rounded bg-red-100 text-red-800';
+            if (status === 'pending') badge.className = 'inline-block px-2 py-1 text-xs rounded bg-yellow-100 text-yellow-800';
+            if (status === 'evaluating') badge.className = 'inline-block px-2 py-1 text-xs rounded bg-purple-100 text-purple-800';
+            if (status === 'evaluated') badge.className = 'inline-block px-2 py-1 text-xs rounded bg-gray-100 text-gray-800';
+        }
+    }
+
+    function getStatusText(status) {
+        const texts = {
+            'pending': '待领取',
+            'running': '执行中',
+            'completed': '已完成',
+            'evaluating': '评估中',
+            'evaluated': '已完成',
+            're-execute': '待重试',
+            'failed': '失败',
+            'cancelled': '已取消'
+        };
+        return texts[status] || status;
+    }
+
+    connectWS();
+
     function escapeHtml(text) {
         if (!text) return '';
         const div = document.createElement('div');
@@ -164,21 +209,11 @@
             'completed': 'bg-green-100 text-green-800',
             'evaluating': 'bg-purple-100 text-purple-800',
             'evaluated': 'bg-gray-100 text-gray-800',
-            're-execute': 'bg-orange-100 text-orange-800'
+            're-execute': 'bg-orange-100 text-orange-800',
+            'failed': 'bg-red-100 text-red-800',
+            'cancelled': 'bg-gray-200 text-gray-600'
         };
         return classes[status] || 'bg-gray-100 text-gray-800';
-    }
-
-    function getStatusText(status) {
-        const texts = {
-            'pending': '待领取',
-            'running': '执行中',
-            'completed': '已完成',
-            'evaluating': '评估中',
-            'evaluated': '已完成',
-            're-execute': '待重试'
-        };
-        return texts[status] || status;
     }
 
     function renderTaskList(tasks) {
@@ -190,6 +225,7 @@
         }
         tasks.forEach(task => {
             const card = createEl('div', 'border rounded-lg p-4 hover:shadow-md cursor-pointer transition');
+            card.setAttribute('data-task-id', task.id);
             card.onclick = () => showTaskDetail(task.id);
 
             const delBtn = createEl('button', 'text-red-500 hover:text-red-700');
@@ -343,7 +379,8 @@
 
     loadTasks();
     loadStats();
-    setInterval(loadTasks, 5000);
+    // Reduce polling frequency since WebSocket handles live updates
+    setInterval(loadTasks, 15000);
     </script>
 </body>
 </html>

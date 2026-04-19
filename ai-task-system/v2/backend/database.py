@@ -20,6 +20,7 @@ class Task(BaseModel):
     improvement_threshold: int = 7
     result: Optional[str] = None
     feedback_md: Optional[str] = None
+    priority: int = 5
 
 class Execution(BaseModel):
     id: str
@@ -45,6 +46,15 @@ class Database:
 
     async def init(self):
         async with aiosqlite.connect(self.db_path) as db:
+            # WAL mode for better concurrency
+            await db.execute("PRAGMA journal_mode=WAL;")
+            await db.execute("PRAGMA busy_timeout=5000;")
+            # Add priority column if it doesn't exist (for existing dbs)
+            try:
+                await db.execute("ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 5;")
+            except Exception:
+                pass  # column already exists
+
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
@@ -61,7 +71,8 @@ class Database:
                     max_iterations INTEGER DEFAULT 3,
                     improvement_threshold INTEGER DEFAULT 7,
                     result TEXT,
-                    feedback_md TEXT
+                    feedback_md TEXT,
+                    priority INTEGER DEFAULT 5
                 )
             """)
             await db.execute("""
@@ -92,28 +103,57 @@ class Database:
             await db.commit()
 
     def _row_to_task(self, row) -> Task:
+        # Handle rows that may not have priority column (existing dbs)
+        priority = row[15] if len(row) > 15 else 5
         return Task(
             id=row[0], title=row[1], description=row[2], status=row[3],
             created_at=row[4], claimed_at=row[5], started_at=row[6],
             completed_at=row[7], executor_model=row[8], evaluator_model=row[9],
             iteration_count=row[10], max_iterations=row[11],
-            improvement_threshold=row[12], result=row[13], feedback_md=row[14]
+            improvement_threshold=row[12], result=row[13], feedback_md=row[14],
+            priority=priority
         )
+
+    async def claim_one_task(self):
+        """Atomically claim one pending task, returning None if queue is empty.
+        Uses UPDATE ... WHERE status='pending' to prevent double-claiming."""
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM tasks WHERE status='pending' ORDER BY priority DESC, created_at ASC LIMIT 1"
+            ) as cursor:
+                row = await cursor.fetchone()
+            if not row:
+                return None
+            task = self._row_to_task(row)
+            await db.execute(
+                "UPDATE tasks SET status='running', claimed_at=? WHERE id=? AND status='pending'",
+                (datetime.now().isoformat(), task.id)
+            )
+            await db.commit()
+            # Re-fetch to confirm we actually claimed it (race condition guard)
+            async with db.execute("SELECT status FROM tasks WHERE id=?") as cursor:
+                r = await cursor.fetchone()
+            if r is None or r[0] != 'running':
+                return None
+            return task
 
     async def create_task(self, title: str, description: str,
                           executor_model: str = "claude-opus-4-6",
-                          evaluator_model: str = "gpt-4") -> Task:
+                          evaluator_model: str = "gpt-4",
+                          priority: int = 5) -> Task:
         task = Task(id=str(uuid.uuid4()), title=title, description=description,
-                    executor_model=executor_model, evaluator_model=evaluator_model)
+                    executor_model=executor_model, evaluator_model=evaluator_model,
+                    priority=priority)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO tasks (id, title, description, status, executor_model,
                                   evaluator_model, iteration_count, max_iterations,
-                                  improvement_threshold)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  improvement_threshold, priority)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (task.id, task.title, task.description, task.status,
                   task.executor_model, task.evaluator_model, task.iteration_count,
-                  task.max_iterations, task.improvement_threshold))
+                  task.max_iterations, task.improvement_threshold, task.priority))
             await db.commit()
         return task
 

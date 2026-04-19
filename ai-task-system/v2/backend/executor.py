@@ -1,34 +1,33 @@
-import subprocess
-from typing import Optional, Tuple
+import os
+from .base_executor import BaseExecutor
+from .cli_executor import CLIExecutor
+from .sdk_executor import SDKExecutor
+
 
 class Executor:
-    def __init__(self, cli_command: str = "claw"):
-        self.cli_command = cli_command
+    """执行器路由：根据配置选择 CLI 或 SDK 引擎"""
 
-    def build_command(self, task_id: str, model: str, description: str) -> str:
-        return f'{self.cli_command} --task-id {task_id} --model {model} "{description}"'
+    def __init__(self, config: dict = None):
+        config = config or {}
+        engine = os.environ.get("EXECUTOR_ENGINE", config.get("engine", "cli"))
+
+        if engine == "sdk":
+            self._impl: BaseExecutor = SDKExecutor(
+                cli_path=config.get("claw_path", "claw")
+            )
+        else:
+            self._impl: BaseExecutor = CLIExecutor(
+                cli_command=config.get("claw_command", "claw"),
+                default_timeout=config.get("timeout", 600),
+            )
+
+    @property
+    def name(self) -> str:
+        return self._impl.name
 
     async def execute(self, task_id: str, model: str, description: str,
-                      feedback_md: Optional[str] = None) -> Tuple[str, Optional[str]]:
-        cmd = self.build_command(task_id, model, description)
+                      feedback_md=None, timeout=None):
+        return await self._impl.execute(task_id, model, description, feedback_md, timeout)
 
-        # 如果有反馈，追加到命令
-        if feedback_md:
-            cmd = f'{cmd} --feedback "{feedback_md}"'
-
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=600  # 10 分钟超时
-            )
-            if result.returncode == 0:
-                return result.stdout, None
-            else:
-                return result.stdout, result.stderr
-        except subprocess.TimeoutExpired:
-            return "", "Execution timeout"
-        except Exception as e:
-            return "", str(e)
+    async def cancel(self, task_id: str) -> bool:
+        return await self._impl.cancel(task_id)

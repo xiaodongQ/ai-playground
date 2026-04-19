@@ -1,16 +1,29 @@
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
+from fastapi import WebSocket, WebSocketDisconnect
 from backend.api.routes import router as api_router
 from backend.scheduler import Scheduler
+from backend.websocket_manager import WebSocketManager
 
 app = FastAPI(title="AI Task System")
 scheduler = Scheduler()
+ws_manager = WebSocketManager()
 
 app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 async def root():
     return FileResponse("frontend/index.html")
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+
 
 @app.get("/api/health")
 async def health():
