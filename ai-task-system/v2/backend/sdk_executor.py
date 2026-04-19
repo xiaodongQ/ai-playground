@@ -14,22 +14,15 @@ class SDKExecutor(BaseExecutor):
         self.cli_path = cli_path
         self._sessions: Dict[str, Any] = {}
         self._interrupt_flags: Dict[str, bool] = {}
-        self._client = None
 
-    @property
-    def client(self):
-        """延迟导入，SDK 未安装时 CLI 回退"""
-        if self._client is None:
-            try:
-                from codebuddy_agent_sdk import CodeBuddy
-                self._client = CodeBuddy(cli_path=self.cli_path)
-            except ImportError:
-                logger.warning(
-                    "codebuddy_agent_sdk not installed, SDKExecutor will not be usable. "
-                    "Install with: pip install codebuddy-agent-sdk"
-                )
-                return None
-        return self._client
+    def _build_options(self, timeout: Optional[int], task_id: str):
+        """构建 CodeBuddyAgentOptions，timeout 通过 request_timeout_ms 传入"""
+        from codebuddy_agent_sdk import CodeBuddyAgentOptions
+        return CodeBuddyAgentOptions(
+            codebuddy_code_path=self.cli_path,
+            session_id=task_id,
+            request_timeout_ms=(timeout * 1000) if timeout else None,
+        )
 
     async def execute(
         self,
@@ -51,16 +44,14 @@ class SDKExecutor(BaseExecutor):
         self._interrupt_flags[task_id] = False
         output_parts = []
 
-        sdk_client = self.client
-        if sdk_client is None:
-            return "", "codebuddy_agent_sdk not installed"
-
         try:
-            # SDK 原生 async generator
-            async for message in sdk_client.query(
+            from codebuddy_agent_sdk import query
+            options = self._build_options(timeout, task_id)
+
+            # SDK top-level query() returns AsyncIterator[Message]
+            async for message in query(
                 prompt=prompt,
-                session_id=task_id,
-                timeout=timeout or 600,
+                options=options,
             ):
                 if self._interrupt_flags.get(task_id):
                     return "\n".join(output_parts), "Interrupted by user"
@@ -75,6 +66,13 @@ class SDKExecutor(BaseExecutor):
                     return "\n".join(output_parts), f"SDK error: {err_msg}"
 
             return "\n".join(output_parts), None
+
+        except ImportError:
+            logger.warning(
+                "codebuddy_agent_sdk not installed, SDKExecutor will not be usable. "
+                "Install with: pip install codebuddy-agent-sdk"
+            )
+            return "", "codebuddy_agent_sdk not installed"
 
         except Exception as e:
             logger.error(f"SDKExecutor[{task_id}] error: {e}")
