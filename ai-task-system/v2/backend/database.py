@@ -132,7 +132,7 @@ class Database:
             )
             await db.commit()
             # Re-fetch to confirm we actually claimed it (race condition guard)
-            async with db.execute("SELECT status FROM tasks WHERE id=?") as cursor:
+            async with db.execute("SELECT status FROM tasks WHERE id=?", (task.id,)) as cursor:
                 r = await cursor.fetchone()
             if r is None or r[0] != 'running':
                 return None
