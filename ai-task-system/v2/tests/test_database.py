@@ -54,3 +54,71 @@ async def test_delete_task(db):
     task = await db.create_task(title="Test", description="Desc")
     await db.delete_task(task.id)
     assert await db.get_task(task.id) is None
+
+@pytest.mark.asyncio
+async def test_heartbeat_fields(db):
+    task = await db.create_task(
+        title="Test",
+        description="Test desc",
+        executor_model="claude"
+    )
+
+    await db.update_heartbeat(task.id)
+
+    loaded = await db.get_task(task.id)
+    assert loaded.last_heartbeat is not None
+    assert loaded.retry_count == 0
+
+@pytest.mark.asyncio
+async def test_list_tasks_pagination(db):
+    for i in range(5):
+        await db.create_task(title=f"Task {i}", description="desc", executor_model="claude")
+
+    tasks = await db.list_tasks(page=1, page_size=2)
+    total = await db.count_tasks()
+
+    assert len(tasks) == 2
+    assert total == 5
+
+@pytest.mark.asyncio
+async def test_increment_retry_count(db):
+    task = await db.create_task(title="Test", description="Desc")
+
+    await db.increment_retry_count(task.id)
+    await db.increment_retry_count(task.id)
+
+    loaded = await db.get_task(task.id)
+    assert loaded.retry_count == 2
+
+@pytest.mark.asyncio
+async def test_update_task_status_failed(db):
+    task = await db.create_task(title="Test", description="Desc")
+    await db.update_task_status(task.id, "failed")
+
+    loaded = await db.get_task(task.id)
+    assert loaded.status == "failed"
+    assert loaded.failed_at is not None
+
+@pytest.mark.asyncio
+async def test_reset_task_for_retry(db):
+    task = await db.create_task(title="Test", description="Desc")
+    await db.update_task_status(task.id, "running")
+    await db.increment_retry_count(task.id)
+
+    await db.reset_task_for_retry(task.id)
+
+    loaded = await db.get_task(task.id)
+    assert loaded.status == "pending"
+
+@pytest.mark.asyncio
+async def test_batch_update_heartbeat(db):
+    tasks = []
+    for i in range(3):
+        t = await db.create_task(title=f"Task {i}", description="desc", executor_model="claude")
+        tasks.append(t.id)
+
+    await db.batch_update_heartbeat(tasks)
+
+    for task_id in tasks:
+        loaded = await db.get_task(task_id)
+        assert loaded.last_heartbeat is not None
