@@ -1,10 +1,12 @@
 import asyncio
+import json
 from datetime import datetime
 from typing import Optional
 from backend.database import Database
 from backend.executor import Executor
 from backend.evaluator import Evaluator
 from backend.retry import RetryExecutor, RetryConfig
+from backend.artifacts import ArtifactsManager
 
 
 class Scheduler:
@@ -16,6 +18,7 @@ class Scheduler:
         self.executor = Executor()
         self.evaluator = Evaluator()
         self.retry_executor = RetryExecutor(self.executor, RetryConfig())
+        self.artifacts_manager = ArtifactsManager()
 
     async def start(self):
         self._running = True
@@ -37,7 +40,27 @@ class Scheduler:
                 print(f"Scheduler error: {e}")
             await asyncio.sleep(self.poll_interval)
 
+    async def _update_waiting_tasks(self):
+        """Check waiting tasks and promote them to pending if dependencies are ready."""
+        await self.db.init()
+        waiting_tasks = await self.db.list_tasks(status="waiting")
+        promoted = []
+        for task in waiting_tasks:
+            deps = json.loads(task.dependency_artifact_ids or "[]")
+            if not deps:
+                # No dependencies, promote to pending
+                await self.db.update_task_status(task.id, "pending")
+                promoted.append(task.id)
+            elif self.artifacts_manager.get_dependencies_ready(task.root_task_id, deps):
+                await self.db.update_task_status(task.id, "pending")
+                promoted.append(task.id)
+        if promoted:
+            logger.info(f"Promoted waiting tasks to pending: {promoted}")
+        return promoted
+
     async def _process_pending_tasks(self):
+        # Periodically check waiting tasks
+        await self._update_waiting_tasks()
         # Atomically claim exactly one task per poll cycle
         task = await self.db.claim_one_task()
         if not task:

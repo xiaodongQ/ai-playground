@@ -1,8 +1,25 @@
 import aiosqlite
 import uuid
+import json
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel
+
+
+class ArtifactRecord(BaseModel):
+    id: str
+    root_task_id: str
+    parent_task_id: Optional[str] = None
+    artifact_name: str
+    artifact_type: str = "file"
+    file_path: str = ""
+    file_hash: str = ""
+    version: int = 1
+    dependency_declaration: str = "[]"  # JSON array of artifact IDs
+    is_valid: bool = True
+    is_final: bool = False
+    created_by: str = "executor"
+    created_at: str = ""
 
 class Task(BaseModel):
     id: str
@@ -51,11 +68,18 @@ class Database:
             # WAL mode for better concurrency
             await db.execute("PRAGMA journal_mode=WAL;")
             await db.execute("PRAGMA busy_timeout=5000;")
-            # Add priority column if it doesn't exist (for existing dbs)
-            try:
-                await db.execute("ALTER TABLE tasks ADD COLUMN priority INTEGER DEFAULT 5;")
-            except Exception:
-                pass  # column already exists
+
+            # Add columns if they don't exist (for existing dbs)
+            for col, default in [
+                ("priority", "INTEGER DEFAULT 5"),
+                ("root_task_id", "TEXT"),
+                ("parent_task_id", "TEXT"),
+                ("dependency_artifact_ids", "TEXT DEFAULT '[]'"),
+            ]:
+                try:
+                    await db.execute(f"ALTER TABLE tasks ADD COLUMN {col} {default};")
+                except Exception:
+                    pass  # column already exists
 
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -74,7 +98,28 @@ class Database:
                     improvement_threshold INTEGER DEFAULT 7,
                     result TEXT,
                     feedback_md TEXT,
-                    priority INTEGER DEFAULT 5
+                    priority INTEGER DEFAULT 5,
+                    root_task_id TEXT,
+                    parent_task_id TEXT,
+                    dependency_artifact_ids TEXT DEFAULT '[]'
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS artifacts (
+                    id TEXT PRIMARY KEY,
+                    root_task_id TEXT NOT NULL,
+                    parent_task_id TEXT,
+                    artifact_name TEXT NOT NULL,
+                    artifact_type TEXT DEFAULT 'file',
+                    file_path TEXT DEFAULT '',
+                    file_hash TEXT DEFAULT '',
+                    version INTEGER DEFAULT 1,
+                    dependency_declaration TEXT DEFAULT '[]',
+                    is_valid INTEGER DEFAULT 1,
+                    is_final INTEGER DEFAULT 0,
+                    created_by TEXT DEFAULT 'executor',
+                    created_at TEXT DEFAULT ''
                 )
             """)
             await db.execute("""
@@ -216,6 +261,49 @@ class Database:
                         "SELECT * FROM tasks ORDER BY created_at DESC") as cursor:
                     rows = await cursor.fetchall()
             return [self._row_to_task(row) for row in rows]
+
+    async def create_artifact(self, artifact: ArtifactRecord) -> ArtifactRecord:
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("""
+                INSERT INTO artifacts (id, root_task_id, parent_task_id, artifact_name,
+                    artifact_type, file_path, file_hash, version, dependency_declaration,
+                    is_valid, is_final, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (artifact.id, artifact.root_task_id, artifact.parent_task_id,
+                  artifact.artifact_name, artifact.artifact_type, artifact.file_path,
+                  artifact.file_hash, artifact.version, artifact.dependency_declaration,
+                  int(artifact.is_valid), int(artifact.is_final), artifact.created_by,
+                  artifact.created_at or datetime.now().isoformat()))
+            await db.commit()
+        return artifact
+
+    async def get_artifacts(self, root_task_id: str) -> List[ArtifactRecord]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM artifacts WHERE root_task_id=? ORDER BY created_at DESC",
+                (root_task_id,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [ArtifactRecord(
+                    id=r[0], root_task_id=r[1], parent_task_id=r[2],
+                    artifact_name=r[3], artifact_type=r[4], file_path=r[5],
+                    file_hash=r[6], version=r[7], dependency_declaration=r[8],
+                    is_valid=bool(r[9]), is_final=bool(r[10]),
+                    created_by=r[11], created_at=r[12])
+                    for r in rows]
+
+    async def mark_artifact_invalid(self, artifact_id: str):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE artifacts SET is_valid=0 WHERE id=?", (artifact_id,))
+            await db.commit()
+
+    async def mark_artifact_final(self, artifact_id: str):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE artifacts SET is_final=1 WHERE id=?", (artifact_id,))
+            await db.commit()
 
     async def delete_task(self, task_id: str):
         async with aiosqlite.connect(self.db_path) as db:
