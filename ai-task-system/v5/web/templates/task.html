@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>任务详情 - AI Task System</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- 导航栏 -->
+  <nav class="navbar">
+    <a href="/" class="navbar-brand">
+      <span class="icon">🤖</span>
+      <span>AI Task System</span>
+    </a>
+    <div class="navbar-links">
+      <a href="/">任务列表</a>
+      <a href="/new">新建任务</a>
+    </div>
+  </nav>
+
+  <!-- 主容器 -->
+  <div class="container">
+    <!-- 返回链接 -->
+    <a href="/" class="back-link">← 返回任务列表</a>
+
+    <!-- 任务详情头部 -->
+    <div class="task-detail-header" id="task-header">
+      <h1 id="task-prompt">加载中...</h1>
+      <div class="task-info-grid" id="task-info">
+        <div class="task-info-item">
+          <div class="info-label">任务 ID</div>
+          <div class="info-value" id="task-id">-</div>
+        </div>
+        <div class="task-info-item">
+          <div class="info-label">状态</div>
+          <div class="info-value" id="task-status">-</div>
+        </div>
+        <div class="task-info-item">
+          <div class="info-label">Agent</div>
+          <div class="info-value" id="task-agent">-</div>
+        </div>
+        <div class="task-info-item">
+          <div class="info-label">创建时间</div>
+          <div class="info-value" id="task-created">-</div>
+        </div>
+        <div class="task-info-item">
+          <div class="info-label">运行时长</div>
+          <div class="info-value" id="task-duration">-</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 实时输出 -->
+    <div class="output-container">
+      <div class="output-header">
+        <div class="output-title">
+          <span>📤</span>
+          <span>实时输出</span>
+        </div>
+        <div id="connection-status" style="font-size: 0.75rem; color: var(--text-secondary);">
+          连接中...
+        </div>
+      </div>
+      <div class="output-content" id="output-content">
+        <div class="output-loading">
+          <div class="spinner"></div>
+          <span>正在连接实时输出...</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+  <script>
+    // 获取任务 ID
+    const taskId = window.location.pathname.split('/').pop();
+    
+    let taskData = null;
+    let durationInterval = null;
+
+    // 页面初始化
+    document.addEventListener('DOMContentLoaded', async () => {
+      const outputContent = document.getElementById('output-content');
+      const connectionStatus = document.getElementById('connection-status');
+
+      // 加载任务详情
+      async function loadTask() {
+        try {
+          taskData = await api.getTask(taskId);
+          updateTaskDisplay(taskData);
+          updateOutput(taskData);
+        } catch (err) {
+          console.error('Failed to load task:', err);
+          outputContent.innerHTML = `
+            <div class="output-empty">
+              <p>⚠️ 加载任务详情失败: ${escapeHtml(err.message)}</p>
+            </div>
+          `;
+        }
+      }
+
+      // 更新任务信息显示
+      function updateTaskDisplay(task) {
+        document.getElementById('task-prompt').textContent = 
+          task.prompt || task.payload?.prompt || '-';
+        document.getElementById('task-id').textContent = 
+          task.task_id || task.id || '-';
+        
+        const status = formatStatus(task.status);
+        document.getElementById('task-status').innerHTML = 
+          `<span class="task-status ${status.class}" style="display: inline-block; margin-right: 0.5rem;"></span>${status.text}`;
+        
+        document.getElementById('task-agent').textContent = 
+          task.agent || '-';
+        document.getElementById('task-created').textContent = 
+          formatTime(task.created_at || task.createdAt);
+        
+        // 启动时长计时器
+        if (task.status === 'running' || task.status === 'pending') {
+          startDurationTimer(task.started_at || task.startedAt);
+        }
+      }
+
+      // 更新输出显示
+      function updateOutput(task) {
+        // 如果有历史输出
+        if (task.output || task.result) {
+          const output = task.output || task.result?.output || '';
+          if (output) {
+            outputContent.innerHTML = output.split('\n').map(line => {
+              if (line.startsWith('[ERR]') || line.includes('Error')) {
+                return `<p class="output-line stderr">${formatOutput(line)}</p>`;
+              }
+              return `<p class="output-line stdout">${formatOutput(line)}</p>`;
+            }).join('');
+            scrollToBottom(outputContent);
+            return;
+          }
+        }
+
+        // 如果任务已完成
+        if (task.status === 'done' || task.status === 'failed') {
+          if (!outputContent.querySelector('.output-line')) {
+            outputContent.innerHTML = `
+              <p class="output-line system">任务已${task.status === 'done' ? '完成' : '失败'}，无更多输出</p>
+            `;
+          }
+        }
+      }
+
+      // 启动时长计时器
+      function startDurationTimer(startTime) {
+        if (durationInterval) clearInterval(durationInterval);
+        
+        const updateDuration = () => {
+          const duration = formatDuration(startTime);
+          document.getElementById('task-duration').textContent = duration;
+          
+          // 如果任务已完成，停止计时
+          if (taskData && (taskData.status === 'done' || taskData.status === 'failed')) {
+            clearInterval(durationInterval);
+          }
+        };
+        
+        updateDuration();
+        durationInterval = setInterval(updateDuration, 1000);
+      }
+
+      // 添加输出行
+      function appendOutput(text, type = 'stdout') {
+        const lines = text.split('\n');
+        lines.forEach(line => {
+          if (!line.trim()) return;
+          const p = document.createElement('p');
+          p.className = `output-line ${type}`;
+          p.textContent = line;
+          outputContent.appendChild(p);
+        });
+        scrollToBottom(outputContent);
+      }
+
+      // 初始化 WebSocket
+      async function initWS() {
+        const ws = await initWebSocket();
+        if (!ws) {
+          connectionStatus.textContent = 'WebSocket 连接失败';
+          connectionStatus.style.color = 'var(--error)';
+          return;
+        }
+
+        connectionStatus.textContent = '已连接';
+        connectionStatus.style.color = 'var(--success)';
+
+        // 监听任务输出
+        ws.on('task_output', (msg) => {
+          if (msg.task_id === taskId || msg.data?.task_id === taskId) {
+            appendOutput(msg.data?.text || msg.data?.line || '', 'stdout');
+          }
+        });
+
+        // 监听任务状态变化
+        ws.on('task_status', (msg) => {
+          if (msg.task_id === taskId || msg.data?.task_id === taskId) {
+            const newStatus = msg.data?.status || msg.status;
+            taskData.status = newStatus;
+            updateTaskDisplay(taskData);
+            
+            if (newStatus === 'running') {
+              connectionStatus.textContent = '🔄 执行中';
+              connectionStatus.style.color = 'var(--running)';
+            }
+          }
+        });
+
+        // 监听任务完成
+        ws.on('task_complete', (msg) => {
+          if (msg.task_id === taskId || msg.data?.task_id === taskId) {
+            const finalStatus = msg.data?.status || taskData.status;
+            taskData.status = finalStatus;
+            updateTaskDisplay(taskData);
+            
+            if (finalStatus === 'done') {
+              connectionStatus.textContent = '✅ 已完成';
+              connectionStatus.style.color = 'var(--success)';
+            } else if (finalStatus === 'failed') {
+              connectionStatus.textContent = '❌ 失败';
+              connectionStatus.style.color = 'var(--error)';
+            }
+            
+            // 停止时长计时
+            if (durationInterval) clearInterval(durationInterval);
+            
+            // 重新加载任务获取最终结果
+            loadTask();
+          }
+        });
+      }
+
+      // 初始化
+      await loadTask();
+      await initWS();
+
+      // 每 5 秒刷新任务状态（如果还在运行）
+      const statusCheck = setInterval(async () => {
+        if (taskData && (taskData.status === 'pending' || taskData.status === 'running')) {
+          await loadTask();
+        } else {
+          clearInterval(statusCheck);
+        }
+      }, 5000);
+    });
+  </script>
+</body>
+</html>
