@@ -230,8 +230,14 @@ class ArtifactsManager:
             affected_task_ids = affected
 
             # Broadcast to WebSocket clients
-            if self.ws_manager and affected_task_ids:
-                await self.ws_manager.broadcast({
+            _ws_manager = getattr(self, "ws_manager", None)
+            if not _ws_manager:
+                try:
+                    from backend.main import ws_manager as _ws_manager
+                except ImportError:
+                    _ws_manager = None
+            if _ws_manager and affected_task_ids:
+                await _ws_manager.broadcast({
                     "type": "artifact_invalidated",
                     "artifact_id": artifact_id,
                     "affected_task_ids": affected_task_ids,

@@ -19,7 +19,7 @@ class Scheduler:
         self.executor = executor if executor is not None else Executor()
         self.evaluator = Evaluator()
         self.retry_executor = RetryExecutor(self.executor, RetryConfig())
-        self.artifacts_manager = ArtifactsManager()
+        self.artifacts_manager = ArtifactsManager(db=self.db)
 
     async def start(self):
         self._running = True
