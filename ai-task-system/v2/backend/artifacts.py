@@ -197,21 +197,24 @@ class ArtifactsManager:
         if not self.db:
             return []
 
+        import aiosqlite
         affected_task_ids = []
+        db_path = getattr(self.db, "db_path", None)
+        if not db_path:
+            return []
 
         async def _do_notify():
             nonlocal affected_task_ids
-            import sqlite3
-            # Query tasks where dependency_artifact_ids contains artifact_id
-            async with self.db._conn_lock:
-                conn = self.db._db_conn
-                cursor = await conn.execute(
+            async with aiosqlite.connect(db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
                     """SELECT id, dependency_artifact_ids FROM tasks
                        WHERE root_task_id = ? AND (status = 'waiting' OR status = 'pending')""",
                     (root_task_id,)
-                )
-                rows = await cursor.fetchall()
+                ) as cursor:
+                    rows = await cursor.fetchall()
 
+            affected = []
             for row in rows:
                 task_id, dep_json = row[0], row[1]
                 try:
@@ -219,9 +222,12 @@ class ArtifactsManager:
                 except json.JSONDecodeError:
                     deps = []
                 if artifact_id in deps:
-                    affected_task_ids.append(task_id)
-                    # Downgrade pending -> waiting
-                    await self.db.update_task_status(task_id, "waiting")
+                    affected.append(task_id)
+
+            # Batch update statuses outside the connection context
+            for task_id in affected:
+                await self.db.update_task_status(task_id, "waiting")
+            affected_task_ids = affected
 
             # Broadcast to WebSocket clients
             if self.ws_manager and affected_task_ids:
@@ -235,9 +241,6 @@ class ArtifactsManager:
         import asyncio
         try:
             loop = asyncio.get_running_loop()
-            # Already in async context — create task
-            import contextvars
-            ctx = contextvars.copy_context()
             loop.create_task(_do_notify())
         except RuntimeError:
             # No running loop — run synchronously
