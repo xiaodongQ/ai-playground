@@ -1,6 +1,7 @@
 import difflib
 import os
 import yaml
+import json
 from pathlib import Path as _Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -54,6 +55,55 @@ async def list_tasks(status: Optional[str] = None):
     await db.init()
     tasks = await db.list_tasks(status=status)
     return tasks
+
+@router.get("/tasks/waiting")
+async def list_waiting_tasks():
+    """List all waiting tasks (waiting for dependencies)."""
+    await db.init()
+    tasks = await db.list_tasks(status="waiting")
+    return tasks
+
+
+@router.post("/tasks/{task_id}/wait")
+async def set_task_waiting(task_id: str, dependency_artifact_ids: List[str]):
+    """Set a task to waiting status, specifying artifact IDs it depends on."""
+    await db.init()
+    task = await db.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    await db.update_task_field(task_id, "dependency_artifact_ids", json.dumps(dependency_artifact_ids))
+    await db.update_task_status(task_id, "waiting")
+    return {"status": "waiting", "task_id": task_id}
+
+
+@router.get("/tasks/{task_id}/dependencies-status")
+async def check_dependencies_status(task_id: str):
+    """Check if all dependencies for a waiting task are satisfied."""
+    await db.init()
+    task = await db.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    deps = json.loads(task.dependency_artifact_ids or "[]")
+
+    artifacts = await db.get_artifacts(task.root_task_id or task_id)
+    artifact_map = {a.id: a for a in artifacts}
+
+    results = []
+    for dep_id in deps:
+        if dep_id in artifact_map:
+            a = artifact_map[dep_id]
+            results.append({
+                "artifact_id": dep_id,
+                "is_valid": a.is_valid,
+                "is_final": a.is_final
+            })
+        else:
+            results.append({"artifact_id": dep_id, "is_valid": False, "is_final": False, "reason": "not_found"})
+
+    all_ready = all(r.get("is_valid", False) for r in results)
+    return {"all_satisfied": all_ready, "dependencies": results}
+
 
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str):
@@ -165,9 +215,11 @@ async def get_stats():
     pending = len([t for t in all_tasks if t.status == "pending"])
     completed = len([t for t in all_tasks if t.status == "completed"])
     evaluated = len([t for t in all_tasks if t.status == "evaluated"])
+    waiting = len([t for t in all_tasks if t.status == "waiting"])
     return {
         "total": len(all_tasks),
         "pending": pending,
         "completed": completed,
-        "evaluated": evaluated
+        "evaluated": evaluated,
+        "waiting": waiting,
     }
