@@ -1,8 +1,11 @@
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 from backend.database import Database
 from backend.executor import Executor
 from backend.evaluator import Evaluator
