@@ -55,9 +55,25 @@ class Scheduler:
                 # No dependencies, promote to pending
                 await self.db.update_task_status(task.id, "pending")
                 promoted.append(task.id)
-            elif self.artifacts_manager.get_dependencies_ready(task.root_task_id, deps):
+                # Broadcast task_ready
+                try:
+                    from backend.main import ws_manager
+                    await ws_manager.broadcast(
+                        {"type": "task_ready", "task_id": task.id, "status": "pending"}
+                    )
+                except Exception:
+                    pass
+            elif self.artifacts_manager.get_dependencies_ready(task.root_task_id or task.id, deps):
                 await self.db.update_task_status(task.id, "pending")
                 promoted.append(task.id)
+                # Broadcast task_ready
+                try:
+                    from backend.main import ws_manager
+                    await ws_manager.broadcast(
+                        {"type": "task_ready", "task_id": task.id, "status": "pending"}
+                    )
+                except Exception:
+                    pass
         if promoted:
             logger.info(f"Promoted waiting tasks to pending: {promoted}")
         return promoted
