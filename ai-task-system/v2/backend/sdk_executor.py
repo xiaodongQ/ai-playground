@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple, Optional, Dict, Any
+from codebuddy_agent_sdk import CodeBuddySDKClient, CodeBuddyAgentOptions  # noqa: F401
 from .base_executor import BaseExecutor
 
 logger = logging.getLogger(__name__)
@@ -92,27 +93,38 @@ class SDKExecutor(BaseExecutor):
 
         self._interrupt_flags[task_id] = False
         output_parts = []
+        client: Optional[CodeBuddySDKClient] = None
 
         # Load/update session file
         session_data = self._load_session(task_id)
         self._save_session(task_id, session_data)
 
         try:
-            from codebuddy_agent_sdk import CodeBuddySDKClient, CodeBuddyAgentOptions
             options = self._build_options(timeout, task_id)
+            client = CodeBuddySDKClient(options=options)
+            self._clients[task_id] = client
 
-            # SDK top-level query() returns AsyncIterator[Message]
-            async for message in query(
-                prompt=prompt,
-                options=options,
-            ):
+            # Connect in streaming mode (prompt=None) so we control when to send
+            await client.connect(prompt=None)
+
+            # Send the prompt
+            await client.query(prompt)
+
+            # Process messages with aggressive interrupt checking
+            async for message in client.receive_messages():
+                # Check interrupt flag after every message block
                 if self._interrupt_flags.get(task_id):
                     return "\n".join(output_parts), "Interrupted by user"
 
+                # Extract text content from message blocks
                 if hasattr(message, 'content') and message.content:
                     for block in message.content:
                         if hasattr(block, 'text') and block.text:
                             output_parts.append(block.text)
+
+                # Check interrupt again after processing content blocks
+                if self._interrupt_flags.get(task_id):
+                    return "\n".join(output_parts), "Interrupted by user"
 
                 if hasattr(message, 'is_error') and message.is_error:
                     err_msg = getattr(message, 'error', 'Unknown SDK error')
@@ -131,6 +143,52 @@ class SDKExecutor(BaseExecutor):
             logger.error(f"SDKExecutor[{task_id}] error: {e}")
             return "\n".join(output_parts), str(e)
 
-    async def cancel(self, task_id: str) -> bool:
+        finally:
+            # Clean up client
+            if client is not None:
+                try:
+                    await client.disconnect()
+                except Exception as e:
+                    logger.warning(f"SDKExecutor[{task_id}] disconnect error: {e}")
+            self._clients.pop(task_id, None)
+            self._interrupt_flags.pop(task_id, None)
+
+    async def interrupt(self, task_id: str) -> bool:
+        """Send native SDK interrupt to the task's CodeBuddy client.
+
+        Tries to use the SDK's native interrupt capability if a client
+        is active for this task. Falls back to flag-based interrupt.
+        """
+        # Set the flag first to ensure interrupt is triggered
         self._interrupt_flags[task_id] = True
+
+        client = self._clients.get(task_id)
+        if client is not None:
+            try:
+                await client.interrupt()
+                logger.info(f"SDKExecutor[{task_id}] native interrupt sent")
+            except Exception as e:
+                logger.warning(f"SDKExecutor[{task_id}] native interrupt failed: {e}")
+        else:
+            logger.info(f"SDKExecutor[{task_id}] no active client, using flag only")
+
+        return True
+
+    async def cancel(self, task_id: str) -> bool:
+        """Public API: cancel a running task.
+
+        Calls interrupt() to send native SDK interrupt, then performs
+        cleanup of the client and session state.
+        """
+        await self.interrupt(task_id)
+
+        # Additional cleanup
+        client = self._clients.pop(task_id, None)
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+        self._interrupt_flags.pop(task_id, None)
         return True
