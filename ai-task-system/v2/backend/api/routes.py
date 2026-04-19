@@ -88,14 +88,21 @@ async def get_evaluations(task_id: str):
 
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str):
+    from backend.main import scheduler, ws_manager
     await db.init()
     task = await db.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if task.status == "running":
-        # Cancellation signal can be extended via a cancel_tokens dict
+        # Kill the running subprocess
+        await scheduler.executor.cancel(task_id)
+    await db.update_task_status(task_id, "cancelled")
+    try:
+        await ws_manager.broadcast(
+            {"type": "task_update", "task_id": task_id, "status": "cancelled"}
+        )
+    except Exception:
         pass
-    await db.update_task_field(task_id, "status", "cancelled")
     return {"status": "cancelled"}
 
 

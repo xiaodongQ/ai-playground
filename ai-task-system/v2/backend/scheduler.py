@@ -47,6 +47,11 @@ class Scheduler:
 
     async def _execute_task(self, task):
         try:
+            # Check if task was already cancelled before starting
+            current = await self.db.get_task(task.id)
+            if current and current.status == "cancelled":
+                return
+
             # Broadcast running status
             try:
                 from backend.main import ws_manager
@@ -59,6 +64,13 @@ class Scheduler:
             execution = await self.db.create_execution(task.id, task.executor_model)
 
             output, error = await self.retry_executor.execute_with_retry(task)
+
+            # Check if task was cancelled during execution
+            current = await self.db.get_task(task.id)
+            if current and current.status == "cancelled":
+                await self.executor.cancel(task.id)
+                return
+
             await self.db.update_execution(execution.id, output, error or "")
 
             if error and "timeout" in error.lower():
@@ -66,6 +78,10 @@ class Scheduler:
             else:
                 await self.db.update_task_status(task.id, "completed", result=output)
                 await self._evaluate_task(task, execution, output)
+        except asyncio.CancelledError:
+            await self.db.update_task_status(task.id, "cancelled")
+            await self.executor.cancel(task.id)
+            raise
         except Exception as e:
             await self.db.update_task_status(task.id, "failed")
 
