@@ -270,6 +270,14 @@
             const evalRes = await fetch(`${API_BASE}/tasks/${taskId}/evaluations`);
             const evaluations = await evalRes.json();
 
+            // Fetch diff data for execution pairs
+            let diffMap = {};
+            try {
+                const diffRes = await fetch(`${API_BASE}/tasks/${taskId}/executions/diff`);
+                const diffs = await diffRes.json();
+                diffs.forEach(d => { diffMap[d.exec2_id] = d; });
+            } catch (_) {}
+
             const modal = document.getElementById('task-modal');
             const content = document.getElementById('modal-content');
             content.innerHTML = '';
@@ -297,6 +305,42 @@
                         createEl('p', '', [createEl('strong', '', '开始: '), createEl('span', '', ex.started_at ? new Date(ex.started_at).toLocaleString() : '-')]),
                         createEl('p', '', [createEl('strong', '', '完成: '), createEl('span', '', ex.completed_at ? new Date(ex.completed_at).toLocaleString() : '-')])
                     ]);
+
+                    // Diff button if diff data is available
+                    const diff = diffMap[ex.id];
+                    if (diff && diff.diff_lines && diff.diff_lines.length > 0) {
+                        const diffDivId = `diff-${ex.id}`;
+                        const diffBtn = createEl('button', 'text-sm text-blue-600 underline mt-1 mr-2', 'Diff');
+                        diffBtn.style.cssText = 'background:none;border:none;cursor:pointer;padding:0;';
+                        const diffContent = createEl('div', 'hidden mt-2', []);
+                        diffContent.id = diffDivId;
+                        diffBtn.onclick = () => {
+                            const hidden = diffContent.classList.contains('hidden');
+                            if (hidden) {
+                                diffContent.classList.remove('hidden');
+                                diffBtn.textContent = 'Hide Diff';
+                            } else {
+                                diffContent.classList.add('hidden');
+                                diffBtn.textContent = 'Diff';
+                            }
+                        };
+                        const diffLines = diff.diff_lines.map(line => {
+                            if (line.startsWith('+')) {
+                                return createEl('div', 'bg-green-100 text-green-800 px-2', `+ ${line.slice(1)}`);
+                            } else if (line.startsWith('-')) {
+                                return createEl('div', 'bg-red-100 text-red-800 px-2', `- ${line.slice(1)}`);
+                            } else if (line.startsWith('^') || line.startsWith('\ No newline') || line === '---' || line === '+++') {
+                                return createEl('div', 'text-gray-400 px-2', line);
+                            } else {
+                                return createEl('div', 'text-gray-600 px-2', line || ' ');
+                            }
+                        });
+                        diffContent.append(...diffLines);
+                        const btnRow = createEl('div', 'flex items-center mt-1', [diffBtn]);
+                        execCard.appendChild(btnRow);
+                        execCard.appendChild(diffContent);
+                    }
+
                     if (ex.output) {
                         execCard.appendChild(createEl('p', '', [createEl('strong', '', '输出:')]));
                         execCard.appendChild(createEl('pre', 'bg-gray-100 p-2 rounded mt-1 overflow-auto max-h-40', ex.output || ''));
