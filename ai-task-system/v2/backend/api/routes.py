@@ -1,3 +1,4 @@
+import difflib
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -85,6 +86,40 @@ async def get_evaluations(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return await db.get_evaluations(task_id)
+
+
+@router.get("/tasks/{task_id}/executions/diff")
+async def get_executions_diff(task_id: str):
+    """Return diff data between consecutive executions (ASC order)."""
+    await db.init()
+    task = await db.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Get executions in ASC order for consecutive diffs
+    executions = await db.get_executions(task_id, order_desc=False)
+    if len(executions) < 2:
+        return []
+
+    diffs = []
+    for i in range(len(executions) - 1):
+        exec1 = executions[i]
+        exec2 = executions[i + 1]
+        out1 = exec1.output or ""
+        out2 = exec2.output or ""
+        diff_lines = list(difflib.unified_diff(
+            out1.splitlines(),
+            out2.splitlines(),
+            lineterm="",
+        ))
+        diffs.append({
+            "exec1_id": exec1.id,
+            "exec2_id": exec2.id,
+            "exec1_time": exec1.started_at.isoformat() if exec1.started_at else "",
+            "exec2_time": exec2.started_at.isoformat() if exec2.started_at else "",
+            "diff_lines": diff_lines[:100],
+        })
+    return diffs
 
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_task(task_id: str):

@@ -1,8 +1,14 @@
 import logging
+import json
+import os
+from pathlib import Path
+from datetime import datetime
 from typing import Tuple, Optional, Dict, Any
 from .base_executor import BaseExecutor
 
 logger = logging.getLogger(__name__)
+
+SESSIONS_DIR = Path.home() / ".ai_task_system" / "sessions"
 
 
 class SDKExecutor(BaseExecutor):
@@ -14,6 +20,49 @@ class SDKExecutor(BaseExecutor):
         self.cli_path = cli_path
         self._sessions: Dict[str, Any] = {}
         self._interrupt_flags: Dict[str, bool] = {}
+        self._load_sessions_from_disk()
+
+    def _load_sessions_from_disk(self):
+        """Load existing sessions from disk on startup."""
+        if not SESSIONS_DIR.exists():
+            return
+        for f in SESSIONS_DIR.glob("*.json"):
+            try:
+                data = json.loads(f.read_text())
+                task_id = data.get("task_id")
+                if task_id:
+                    self._sessions[task_id] = data
+            except Exception as e:
+                logger.warning(f"Failed to load session file {f}: {e}")
+
+    def _get_session_file(self, task_id: str) -> Path:
+        SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+        return SESSIONS_DIR / f"{task_id}.json"
+
+    def _load_session(self, task_id: str) -> Dict[str, Any]:
+        """Load or create session file for a task."""
+        fpath = self._get_session_file(task_id)
+        if fpath.exists():
+            try:
+                return json.loads(fpath.read_text())
+            except Exception:
+                pass
+        return {
+            "task_id": task_id,
+            "session_id": task_id,
+            "created_at": datetime.now().isoformat(),
+            "last_used": datetime.now().isoformat(),
+        }
+
+    def _save_session(self, task_id: str, session_data: Dict[str, Any]):
+        """Persist session data to disk."""
+        session_data["last_used"] = datetime.now().isoformat()
+        fpath = self._get_session_file(task_id)
+        try:
+            fpath.write_text(json.dumps(session_data, indent=2))
+        except Exception as e:
+            logger.warning(f"Failed to save session file {fpath}: {e}")
+        self._sessions[task_id] = session_data
 
     def _build_options(self, timeout: Optional[int], task_id: str):
         """构建 CodeBuddyAgentOptions，timeout 通过 request_timeout_ms 传入"""
@@ -43,6 +92,10 @@ class SDKExecutor(BaseExecutor):
 
         self._interrupt_flags[task_id] = False
         output_parts = []
+
+        # Load/update session file
+        session_data = self._load_session(task_id)
+        self._save_session(task_id, session_data)
 
         try:
             from codebuddy_agent_sdk import query

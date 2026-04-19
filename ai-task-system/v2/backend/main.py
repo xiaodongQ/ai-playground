@@ -1,3 +1,22 @@
+import os
+import yaml
+from pathlib import Path
+
+# Load config.yaml from v2 root
+CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+_default_config = {
+    "server": {"host": "0.0.0.0", "port": 8000},
+    "database": {"path": "data/tasks.db"},
+    "executor": {"engine": "cli", "cli_path": "claw", "sdk_path": "claw", "timeout": 300},
+    "sdk": {"permission_mode": "bypassPermissions", "model": "claude-opus-4-6"},
+    "evaluator": {"default_model": "gpt-4o", "timeout": 60},
+}
+if CONFIG_PATH.exists():
+    with open(CONFIG_PATH) as f:
+        _default_config = yaml.safe_load(f)
+
+config = _default_config
+
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi import WebSocket, WebSocketDisconnect

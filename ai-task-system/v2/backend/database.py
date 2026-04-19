@@ -30,6 +30,8 @@ class Execution(BaseModel):
     completed_at: Optional[datetime] = None
     output: Optional[str] = None
     error: Optional[str] = None
+    # Not stored; computed at query time as previous execution's output
+    previous_output: Optional[str] = None
 
 class Evaluation(BaseModel):
     id: str
@@ -243,17 +245,23 @@ class Database:
             """, (now, output, error, execution_id))
             await db.commit()
 
-    async def get_executions(self, task_id: str) -> List[Execution]:
+    async def get_executions(self, task_id: str, order_desc: bool = True) -> List[Execution]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+            order = "DESC" if order_desc else "ASC"
             async with db.execute(
-                    "SELECT * FROM executions WHERE task_id = ? ORDER BY started_at DESC",
+                    f"SELECT * FROM executions WHERE task_id = ? ORDER BY started_at {order}",
                     (task_id,)) as cursor:
                 rows = await cursor.fetchall()
-                return [Execution(
+                executions = [Execution(
                     id=r[0], task_id=r[1], executor_model=r[2],
                     started_at=r[3], completed_at=r[4], output=r[5], error=r[6])
                     for r in rows]
+            # Compute previous_output: for DESC order, "previous" = next in list
+            if order_desc and len(executions) > 1:
+                for i, ex in enumerate(executions):
+                    ex.previous_output = executions[i + 1].output if i + 1 < len(executions) else None
+            return executions
 
     async def create_evaluation(self, task_id: str, execution_id: str,
                                  evaluator_model: str, score: int,
