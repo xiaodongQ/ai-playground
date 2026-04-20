@@ -1,25 +1,8 @@
 import aiosqlite
 import uuid
-import json
 from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel
-
-
-class ArtifactRecord(BaseModel):
-    id: str
-    root_task_id: str
-    parent_task_id: Optional[str] = None
-    artifact_name: str
-    artifact_type: str = "file"
-    file_path: str = ""
-    file_hash: str = ""
-    version: int = 1
-    dependency_declaration: str = "[]"  # JSON array of artifact IDs
-    is_valid: bool = True
-    is_final: bool = False
-    created_by: str = "executor"
-    created_at: str = ""
 
 class Task(BaseModel):
     id: str
@@ -37,20 +20,20 @@ class Task(BaseModel):
     improvement_threshold: int = 7
     result: Optional[str] = None
     feedback_md: Optional[str] = None
-    priority: int = 5
-    assigned_agent: Optional[str] = None
-    is_merge: int = 0
+    last_heartbeat: Optional[str] = None
+    retry_count: int = 0
+    failed_at: Optional[datetime] = None
 
 class Execution(BaseModel):
     id: str
     task_id: str
     executor_model: str
+    command: Optional[str] = None
     started_at: datetime = None
     completed_at: Optional[datetime] = None
     output: Optional[str] = None
     error: Optional[str] = None
-    # Not stored; computed at query time as previous execution's output
-    previous_output: Optional[str] = None
+    exit_code: Optional[int] = None
 
 class Evaluation(BaseModel):
     id: str
@@ -67,23 +50,11 @@ class Database:
 
     async def init(self):
         async with aiosqlite.connect(self.db_path) as db:
-            # WAL mode for better concurrency
-            await db.execute("PRAGMA journal_mode=WAL;")
-            await db.execute("PRAGMA busy_timeout=5000;")
-
-            # Add columns if they don't exist (for existing dbs)
-            for col, default in [
-                ("priority", "INTEGER DEFAULT 5"),
-                ("root_task_id", "TEXT"),
-                ("parent_task_id", "TEXT"),
-                ("dependency_artifact_ids", "TEXT DEFAULT '[]'"),
-                ("assigned_agent", "TEXT"),
-                ("is_merge", "INTEGER DEFAULT 0"),
-            ]:
-                try:
-                    await db.execute(f"ALTER TABLE tasks ADD COLUMN {col} {default};")
-                except Exception:
-                    pass  # column already exists
+            # 迁移：添加 command 列（如果不存在）
+            try:
+                await db.execute("ALTER TABLE executions ADD COLUMN command TEXT")
+            except Exception:
+                pass  # 列已存在
 
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
@@ -102,30 +73,9 @@ class Database:
                     improvement_threshold INTEGER DEFAULT 7,
                     result TEXT,
                     feedback_md TEXT,
-                    priority INTEGER DEFAULT 5,
-                    root_task_id TEXT,
-                    parent_task_id TEXT,
-                    dependency_artifact_ids TEXT DEFAULT '[]',
-                    assigned_agent TEXT,
-                    is_merge INTEGER DEFAULT 0
-                )
-            """)
-
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS artifacts (
-                    id TEXT PRIMARY KEY,
-                    root_task_id TEXT NOT NULL,
-                    parent_task_id TEXT,
-                    artifact_name TEXT NOT NULL,
-                    artifact_type TEXT DEFAULT 'file',
-                    file_path TEXT DEFAULT '',
-                    file_hash TEXT DEFAULT '',
-                    version INTEGER DEFAULT 1,
-                    dependency_declaration TEXT DEFAULT '[]',
-                    is_valid INTEGER DEFAULT 1,
-                    is_final INTEGER DEFAULT 0,
-                    created_by TEXT DEFAULT 'executor',
-                    created_at TEXT DEFAULT ''
+                    last_heartbeat TEXT,
+                    retry_count INTEGER DEFAULT 0,
+                    failed_at TEXT
                 )
             """)
             await db.execute("""
@@ -133,10 +83,12 @@ class Database:
                     id TEXT PRIMARY KEY,
                     task_id TEXT NOT NULL,
                     executor_model TEXT NOT NULL,
+                    command TEXT,
                     started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     completed_at DATETIME,
                     output TEXT,
                     error TEXT,
+                    exit_code INTEGER,
                     FOREIGN KEY (task_id) REFERENCES tasks(id)
                 )
             """)
@@ -153,96 +105,47 @@ class Database:
                     FOREIGN KEY (execution_id) REFERENCES executions(id)
                 )
             """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+            # 默认配置
+            await db.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('cli', 'claude')")
+            await db.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('executor_models', 'claude-opus-4-6,claude-sonnet-4-6,gpt-4,gpt-4o,gpt-3.5-turbo,minimax-chat,minimax-2.7,glm-4,qwen-turbo,qwen-plus,qwen-max,kimi-chat')")
+            await db.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('default_executor_model', 'claude-opus-4-6')")
+            await db.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('evaluator_models', 'gpt-4,gpt-4o,claude-opus-4-6,claude-sonnet-4-6,minimax-chat,minimax-2.7,glm-4,qwen-max,kimi-chat')")
+            await db.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('default_evaluator_model', 'gpt-4')")
+            await db.commit()
             await db.commit()
 
     def _row_to_task(self, row) -> Task:
-        # Handle rows that may not have all columns (existing dbs)
-        # Schema: id(0), title(1), description(2), status(3), created_at(4), claimed_at(5),
-        #         started_at(6), completed_at(7), executor_model(8), evaluator_model(9),
-        #         iteration_count(10), max_iterations(11), improvement_threshold(12),
-        #         result(13), feedback_md(14), priority(15), root_task_id(16),
-        #         parent_task_id(17), dependency_artifact_ids(18), assigned_agent(19), is_merge(20)
-        priority = row[15] if len(row) > 15 else 5
-        assigned_agent = row[19] if len(row) > 19 else None
-        is_merge = row[20] if len(row) > 20 else 0
         return Task(
             id=row[0], title=row[1], description=row[2], status=row[3],
             created_at=row[4], claimed_at=row[5], started_at=row[6],
             completed_at=row[7], executor_model=row[8], evaluator_model=row[9],
             iteration_count=row[10], max_iterations=row[11],
             improvement_threshold=row[12], result=row[13], feedback_md=row[14],
-            priority=priority,
-            assigned_agent=assigned_agent,
-            is_merge=is_merge
+            last_heartbeat=row[15] if len(row) > 15 else None,
+            retry_count=row[16] if len(row) > 16 else 0,
+            failed_at=row[17] if len(row) > 17 else None
         )
-
-    async def claim_one_task(self, agent_id: str = None, only_merge: bool = False):
-        """Atomically claim one pending task, returning None if queue is empty.
-        Uses UPDATE ... WHERE status='pending' to prevent double-claiming.
-
-        If agent_id is provided, prioritizes tasks with assigned_agent == agent_id.
-        Falls back to generic tasks (assigned_agent IS NULL) if no affinity task found.
-
-        If only_merge=True, only claims tasks with is_merge=1."""
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-
-            merge_clause = " AND is_merge=1" if only_merge else ""
-
-            if agent_id:
-                # First: try to claim an agent-affinity task
-                async with db.execute(
-                    f"SELECT * FROM tasks WHERE status='pending' AND assigned_agent=?{merge_clause} "
-                    f"ORDER BY priority DESC, created_at ASC LIMIT 1",
-                    (agent_id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
-
-                # Fallback: generic task if no affinity task found
-                if not row:
-                    async with db.execute(
-                        f"SELECT * FROM tasks WHERE status='pending' AND assigned_agent IS NULL{merge_clause} "
-                        f"ORDER BY priority DESC, created_at ASC LIMIT 1"
-                    ) as cursor:
-                        row = await cursor.fetchone()
-            else:
-                async with db.execute(
-                    f"SELECT * FROM tasks WHERE status='pending'{merge_clause} "
-                    f"ORDER BY priority DESC, created_at ASC LIMIT 1"
-                ) as cursor:
-                    row = await cursor.fetchone()
-
-            if not row:
-                return None
-            task = self._row_to_task(row)
-            await db.execute(
-                "UPDATE tasks SET status='running', claimed_at=? WHERE id=? AND status='pending'",
-                (datetime.now().isoformat(), task.id)
-            )
-            await db.commit()
-            # Re-fetch to confirm we actually claimed it (race condition guard)
-            async with db.execute("SELECT status FROM tasks WHERE id=?", (task.id,)) as cursor:
-                r = await cursor.fetchone()
-            if r is None or r[0] != 'running':
-                return None
-            return task
 
     async def create_task(self, title: str, description: str,
                           executor_model: str = "claude-opus-4-6",
-                          evaluator_model: str = "gpt-4",
-                          priority: int = 5) -> Task:
+                          evaluator_model: str = "gpt-4") -> Task:
         task = Task(id=str(uuid.uuid4()), title=title, description=description,
-                    executor_model=executor_model, evaluator_model=evaluator_model,
-                    priority=priority)
+                    executor_model=executor_model, evaluator_model=evaluator_model)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
                 INSERT INTO tasks (id, title, description, status, executor_model,
                                   evaluator_model, iteration_count, max_iterations,
-                                  improvement_threshold, priority)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  improvement_threshold)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (task.id, task.title, task.description, task.status,
                   task.executor_model, task.evaluator_model, task.iteration_count,
-                  task.max_iterations, task.improvement_threshold, task.priority))
+                  task.max_iterations, task.improvement_threshold))
             await db.commit()
         return task
 
@@ -267,6 +170,9 @@ class Database:
         elif status == "evaluated":
             fields += ", completed_at = ?"
             vals.append(now)
+        elif status == "failed":
+            fields += ", failed_at = ?"
+            vals.append(now)
         if result:
             fields += ", result = ?"
             vals.append(result)
@@ -285,66 +191,77 @@ class Database:
                 (task_id,))
             await db.commit()
 
+    async def increment_retry_count(self, task_id: str):
+        """增加重试计数"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE tasks SET retry_count = retry_count + 1 WHERE id = ?",
+                (task_id,))
+            await db.commit()
+
+    async def reset_task_for_retry(self, task_id: str):
+        """重置任务以便重试（保留 retry_count）"""
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE tasks SET status = 'pending', last_heartbeat = NULL WHERE id = ?",
+                (task_id,))
+            await db.commit()
+
     async def update_task_field(self, task_id: str, field: str, value: str):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(f"UPDATE tasks SET {field} = ? WHERE id = ?", (value, task_id))
             await db.commit()
 
-    async def list_tasks(self, status: str = None) -> List[Task]:
+    async def list_tasks(self, status: str = None, page: int = 1, page_size: int = 20) -> List[Task]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+            offset = (page - 1) * page_size
             if status:
-                async with db.execute(
-                        "SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC",
-                        (status,)) as cursor:
+                query = f"SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC LIMIT {page_size} OFFSET {offset}"
+                async with db.execute(query, (status,)) as cursor:
                     rows = await cursor.fetchall()
             else:
-                async with db.execute(
-                        "SELECT * FROM tasks ORDER BY created_at DESC") as cursor:
+                query = f"SELECT * FROM tasks ORDER BY created_at DESC LIMIT {page_size} OFFSET {offset}"
+                async with db.execute(query) as cursor:
                     rows = await cursor.fetchall()
             return [self._row_to_task(row) for row in rows]
 
-    async def create_artifact(self, artifact: ArtifactRecord) -> ArtifactRecord:
+    async def count_tasks(self, status: str = None) -> int:
+        """统计任务数量"""
+        await self.init()
+        sql = "SELECT COUNT(*) as count FROM tasks"
+        params = []
+        if status:
+            sql += " WHERE status = ?"
+            params.append(status)
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                INSERT INTO artifacts (id, root_task_id, parent_task_id, artifact_name,
-                    artifact_type, file_path, file_hash, version, dependency_declaration,
-                    is_valid, is_final, created_by, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (artifact.id, artifact.root_task_id, artifact.parent_task_id,
-                  artifact.artifact_name, artifact.artifact_type, artifact.file_path,
-                  artifact.file_hash, artifact.version, artifact.dependency_declaration,
-                  int(artifact.is_valid), int(artifact.is_final), artifact.created_by,
-                  artifact.created_at or datetime.now().isoformat()))
-            await db.commit()
-        return artifact
+            async with db.execute(sql, params) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else 0
 
-    async def get_artifacts(self, root_task_id: str) -> List[ArtifactRecord]:
-        async with aiosqlite.connect(self.db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
-                "SELECT * FROM artifacts WHERE root_task_id=? ORDER BY created_at DESC",
-                (root_task_id,)
-            ) as cursor:
-                rows = await cursor.fetchall()
-                return [ArtifactRecord(
-                    id=r[0], root_task_id=r[1], parent_task_id=r[2],
-                    artifact_name=r[3], artifact_type=r[4], file_path=r[5],
-                    file_hash=r[6], version=r[7], dependency_declaration=r[8],
-                    is_valid=bool(r[9]), is_final=bool(r[10]),
-                    created_by=r[11], created_at=r[12])
-                    for r in rows]
-
-    async def mark_artifact_invalid(self, artifact_id: str):
+    async def update_heartbeat(self, task_id: str):
+        """更新任务心跳"""
+        await self.init()
+        now = datetime.now().isoformat()
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
-                "UPDATE artifacts SET is_valid=0 WHERE id=?", (artifact_id,))
+                "UPDATE tasks SET last_heartbeat = ? WHERE id = ?",
+                (now, task_id)
+            )
             await db.commit()
 
-    async def mark_artifact_final(self, artifact_id: str):
+    async def batch_update_heartbeat(self, task_ids: List[str]):
+        """批量更新任务心跳"""
+        if not task_ids:
+            return
+        await self.init()
+        now = datetime.now().isoformat()
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute(
-                "UPDATE artifacts SET is_final=1 WHERE id=?", (artifact_id,))
+            for task_id in task_ids:
+                await db.execute(
+                    "UPDATE tasks SET last_heartbeat = ? WHERE id = ?",
+                    (now, task_id)
+                )
             await db.commit()
 
     async def delete_task(self, task_id: str):
@@ -354,44 +271,76 @@ class Database:
             await db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
             await db.commit()
 
-    async def create_execution(self, task_id: str, executor_model: str) -> Execution:
+    async def delete_all_tasks(self):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM evaluations")
+            await db.execute("DELETE FROM executions")
+            await db.execute("DELETE FROM tasks")
+            await db.commit()
+        return {"deleted": True}
+
+    async def get_config(self, key: str) -> str:
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT value FROM config WHERE key = ?", (key,)) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else None
+
+    async def set_config(self, key: str, value: str):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("INSERT OR REPLACE INTO config (key, value) VALUES (?, ?)", (key, value))
+            await db.commit()
+        return {"key": key, "value": value}
+
+    async def get_all_config(self) -> dict:
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT key, value FROM config") as cursor:
+                rows = await cursor.fetchall()
+                return {row[0]: row[1] for row in rows}
+
+    async def create_execution(self, task_id: str, executor_model: str,
+                               command: str = None) -> Execution:
         exec_record = Execution(
-            id=str(uuid.uuid4()), task_id=task_id, executor_model=executor_model)
+            id=str(uuid.uuid4()), task_id=task_id, executor_model=executor_model,
+            command=command)
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("""
-                INSERT INTO executions (id, task_id, executor_model)
-                VALUES (?, ?, ?)
-            """, (exec_record.id, exec_record.task_id, exec_record.executor_model))
+                INSERT INTO executions (id, task_id, executor_model, command, exit_code)
+                VALUES (?, ?, ?, ?, NULL)
+            """, (exec_record.id, exec_record.task_id, exec_record.executor_model, exec_record.command))
             await db.commit()
         return exec_record
 
     async def update_execution(self, execution_id: str, output: str = None,
-                               error: str = None):
+                               error: str = None, command: str = None, exit_code: int = None):
         now = datetime.now().isoformat()
+        fields = "completed_at = ?, output = ?, error = ?"
+        vals = [now, output, error]
+        if command:
+            fields += ", command = ?"
+            vals.append(command)
+        if exit_code is not None:
+            fields += ", exit_code = ?"
+            vals.append(exit_code)
+        vals.append(execution_id)
         async with aiosqlite.connect(self.db_path) as db:
-            await db.execute("""
-                UPDATE executions SET completed_at = ?, output = ?, error = ?
+            await db.execute(f"""
+                UPDATE executions SET {fields}
                 WHERE id = ?
-            """, (now, output, error, execution_id))
+            """, vals)
             await db.commit()
 
-    async def get_executions(self, task_id: str, order_desc: bool = True) -> List[Execution]:
+    async def get_executions(self, task_id: str) -> List[Execution]:
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
-            order = "DESC" if order_desc else "ASC"
             async with db.execute(
-                    f"SELECT * FROM executions WHERE task_id = ? ORDER BY started_at {order}",
+                    "SELECT * FROM executions WHERE task_id = ? ORDER BY started_at DESC",
                     (task_id,)) as cursor:
                 rows = await cursor.fetchall()
-                executions = [Execution(
+                return [Execution(
                     id=r[0], task_id=r[1], executor_model=r[2],
-                    started_at=r[3], completed_at=r[4], output=r[5], error=r[6])
+                    command=r[3], started_at=r[4], completed_at=r[5], output=r[6], error=r[7],
+                    exit_code=r[8] if len(r) > 8 else None)
                     for r in rows]
-            # Compute previous_output: for DESC order, "previous" = next in list
-            if order_desc and len(executions) > 1:
-                for i, ex in enumerate(executions):
-                    ex.previous_output = executions[i + 1].output if i + 1 < len(executions) else None
-            return executions
 
     async def create_evaluation(self, task_id: str, execution_id: str,
                                  evaluator_model: str, score: int,

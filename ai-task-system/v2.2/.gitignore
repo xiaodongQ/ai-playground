@@ -8,6 +8,7 @@ __pycache__/
 
 # Workspace (task execution)
 workspace/
+.venv
 
 # Environment
 .env

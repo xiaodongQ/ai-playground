@@ -59,6 +59,7 @@ cd ai-playground/ai-task-system
 ### 2. 安装依赖
 
 ```bash
+source .venv/bin/activate 
 pip install -r requirements.txt
 ```
 
@@ -68,6 +69,8 @@ pip install -r requirements.txt
 export PYTHONPATH=$(pwd)
 uvicorn backend.main:app --reload --port 8000
 ```
+
+<!-- source .venv/bin/activate && export PYTHONPATH=$(pwd) && uvicorn backend.main:app --reload --port 8000 2>&1 & -->
 
 ### 4. 访问
 

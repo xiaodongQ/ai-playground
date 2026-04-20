@@ -1,8 +1,4 @@
-import asyncio
-import os
 from typing import Dict
-from openai import OpenAI
-
 
 class Evaluator:
     DEFAULT_PROMPT_TEMPLATE = """## 任务
@@ -31,36 +27,8 @@ class Evaluator:
 基于评估报告的改进建议，请生成新的执行指令...
 """
 
-    def __init__(self, default_model: str = "gpt-4o"):
+    def __init__(self, default_model: str = "claude-opus-4-6"):
         self.default_model = default_model
-        self._client = None
-
-    @property
-    def client(self) -> OpenAI:
-        if self._client is None:
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                raise RuntimeError("OPENAI_API_KEY environment variable not set")
-            self._client = OpenAI(api_key=api_key)
-        return self._client
-
-    async def evaluate(self, task_description: str, execution_output: str,
-                       original_requirements: str = None,
-                       iteration_count: int = 0,
-                       model: str = None) -> Dict:
-        """使用真实 OpenAI LLM API 进行评估"""
-        model = model or self.default_model
-        prompt = self.build_evaluation_prompt(
-            task_description, execution_output, original_requirements, iteration_count
-        )
-
-        response = await asyncio.to_thread(
-            self.client.chat.completions.create,
-            model=model,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        text = response.choices[0].message.content
-        return self.parse_evaluation(text)
 
     def build_evaluation_prompt(self, task_description: str,
                                  execution_output: str,

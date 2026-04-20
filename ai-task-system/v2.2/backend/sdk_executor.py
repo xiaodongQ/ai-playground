@@ -4,8 +4,15 @@ import os
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple, Optional, Dict, Any
-from codebuddy_agent_sdk import CodeBuddySDKClient, CodeBuddyAgentOptions  # noqa: F401
 from .base_executor import BaseExecutor
+
+try:
+    from codebuddy_agent_sdk import CodeBuddySDKClient, CodeBuddyAgentOptions
+    _SDK_AVAILABLE = True
+except ImportError:
+    _SDK_AVAILABLE = False
+    CodeBuddySDKClient = None
+    CodeBuddyAgentOptions = None
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +28,7 @@ class SDKExecutor(BaseExecutor):
         self.cli_path = cli_path
         self._sessions: Dict[str, Any] = {}
         self._interrupt_flags: Dict[str, bool] = {}
-        self._clients: Dict[str, CodeBuddySDKClient] = {}
+        self._clients: Dict[str, Any] = {}
         self._load_sessions_from_disk()
 
     def _load_sessions_from_disk(self):
@@ -100,6 +107,8 @@ class SDKExecutor(BaseExecutor):
         self._save_session(task_id, session_data)
 
         try:
+            if not _SDK_AVAILABLE:
+                return "", "codebuddy_agent_sdk not installed"
             options = self._build_options(timeout, task_id)
             client = CodeBuddySDKClient(options=options)
             self._clients[task_id] = client

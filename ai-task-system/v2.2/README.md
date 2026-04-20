@@ -38,6 +38,7 @@
 ## 快速开始
 
 ```bash
+source .venv/bin/activate 
 cd ai-task-system/v2.2
 pip install -r requirements.txt
 export PYTHONPATH=$(pwd)

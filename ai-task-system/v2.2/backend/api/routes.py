@@ -1,8 +1,3 @@
-import difflib
-import os
-import yaml
-import json
-from pathlib import Path as _Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -12,21 +7,7 @@ from backend.config import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
-
-# Load config.yaml for database path
-_CONFIG_PATH = _Path(__file__).parent.parent.parent / "config.yaml"
-_config = {
-    "database": {"path": "data/tasks.db"},
-    "evaluator": {"default_model": "gpt-4o"},
-}
-if _CONFIG_PATH.exists():
-    with open(_CONFIG_PATH) as f:
-        _config = yaml.safe_load(f)
-
-# Get db_path from config
-_db_path = _config.get("database", {}).get("path", "data/tasks.db")
-db = Database(db_path=_db_path)
-
+db = Database()
 
 class TaskCreate(BaseModel):
     title: str
@@ -81,55 +62,6 @@ async def list_tasks(status: Optional[str] = None, page: int = 1, page_size: int
         "page_size": page_size,
         "total_pages": total_pages
     }
-
-@router.get("/tasks/waiting")
-async def list_waiting_tasks():
-    """List all waiting tasks (waiting for dependencies)."""
-    await db.init()
-    tasks = await db.list_tasks(status="waiting")
-    return tasks
-
-
-@router.post("/tasks/{task_id}/wait")
-async def set_task_waiting(task_id: str, dependency_artifact_ids: List[str]):
-    """Set a task to waiting status, specifying artifact IDs it depends on."""
-    await db.init()
-    task = await db.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    await db.update_task_field(task_id, "dependency_artifact_ids", json.dumps(dependency_artifact_ids))
-    await db.update_task_status(task_id, "waiting")
-    return {"status": "waiting", "task_id": task_id}
-
-
-@router.get("/tasks/{task_id}/dependencies-status")
-async def check_dependencies_status(task_id: str):
-    """Check if all dependencies for a waiting task are satisfied."""
-    await db.init()
-    task = await db.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    deps = json.loads(task.dependency_artifact_ids or "[]")
-
-    artifacts = await db.get_artifacts(task.root_task_id or task_id)
-    artifact_map = {a.id: a for a in artifacts}
-
-    results = []
-    for dep_id in deps:
-        if dep_id in artifact_map:
-            a = artifact_map[dep_id]
-            results.append({
-                "artifact_id": dep_id,
-                "is_valid": a.is_valid,
-                "is_final": a.is_final
-            })
-        else:
-            results.append({"artifact_id": dep_id, "is_valid": False, "is_final": False, "reason": "not_found"})
-
-    all_ready = all(r.get("is_valid", False) for r in results)
-    return {"all_satisfied": all_ready, "dependencies": results}
-
 
 @router.get("/tasks/{task_id}")
 async def get_task(task_id: str):
@@ -210,76 +142,20 @@ async def get_evaluations(task_id: str):
         raise HTTPException(status_code=404, detail="Task not found")
     return await db.get_evaluations(task_id)
 
-
-@router.get("/tasks/{task_id}/executions/diff")
-async def get_executions_diff(task_id: str):
-    """Return diff data between consecutive executions (ASC order)."""
-    await db.init()
-    task = await db.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-
-    # Get executions in ASC order for consecutive diffs
-    executions = await db.get_executions(task_id, order_desc=False)
-    if len(executions) < 2:
-        return []
-
-    diffs = []
-    for i in range(len(executions) - 1):
-        exec1 = executions[i]
-        exec2 = executions[i + 1]
-        out1 = exec1.output or ""
-        out2 = exec2.output or ""
-        diff_lines = list(difflib.unified_diff(
-            out1.splitlines(),
-            out2.splitlines(),
-            lineterm="",
-        ))
-        diffs.append({
-            "exec1_id": exec1.id,
-            "exec2_id": exec2.id,
-            "exec1_time": exec1.started_at.isoformat() if exec1.started_at else "",
-            "exec2_time": exec2.started_at.isoformat() if exec2.started_at else "",
-            "diff_lines": diff_lines[:100],
-        })
-    return diffs
-
-@router.post("/tasks/{task_id}/cancel")
-async def cancel_task(task_id: str):
-    from backend.main import scheduler, ws_manager
-    await db.init()
-    task = await db.get_task(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    if task.status == "running":
-        # Kill the running subprocess
-        await scheduler.executor.cancel(task_id)
-    await db.update_task_status(task_id, "cancelled")
-    try:
-        await ws_manager.broadcast(
-            {"type": "task_update", "task_id": task_id, "status": "cancelled"}
-        )
-    except Exception:
-        pass
-    return {"status": "cancelled"}
-
-
 @router.get("/stats")
+async def get_stats():
+    await db.init()
     total = await db.count_tasks()
     pending = await db.count_tasks(status="pending")
     running = await db.count_tasks(status="running")
     completed = await db.count_tasks(status="completed")
     failed = await db.count_tasks(status="failed")
-    evaluated = await db.count_tasks(status="evaluated")
-    waiting = await db.count_tasks(status="waiting")
     return {
         "total": total,
         "pending": pending,
         "running": running,
         "completed": completed,
-        "failed": failed,
-        "evaluated": evaluated,
-        "waiting": waiting,
+        "failed": failed
     }
 
 @router.get("/config")
