@@ -1,0 +1,30 @@
+# AI Task System v2.4 Configuration
+
+scheduler:
+  poll_interval: 5
+  cli: claude
+  heartbeat_interval: 30   # heartbeat update interval (seconds)
+  stale_threshold: 120    # zombie task detection (seconds)
+  concurrency: 2          # max concurrent tasks
+
+executor:
+  timeout: 1800           # executor subprocess timeout (seconds)
+  max_auto_retries: 3     # auto retry count
+  auto_retry_delay: 180   # auto retry delay (seconds)
+  allowed_tools: "Bash,Read,Edit,Grep,Glob"
+
+task:
+  timeout: 600            # absolute task timeout (seconds)
+  no_output_timeout: 120  # no-output timeout (seconds)
+  stale_threshold: 120    # zombie task detection (seconds)
+
+evaluator:
+  api_base: ""             # API address, empty means CLI mode
+  model: ""               # evaluation model
+  use_cli: true            # true: use claude --print for evaluation
+
+log:
+  level: INFO
+  file: server.log
+  max_bytes: 10485760
+  backup_count: 5

@@ -1,0 +1,1 @@
+# AI Task System v2.4 - Frontend Package Placeholder
