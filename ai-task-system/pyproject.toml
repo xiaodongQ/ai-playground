@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-task-system"
+version = "0.5.0"
+description = "Unified multi-agent CLI orchestration layer for Claude Code, OpenAI Codex, and CodeBuddy"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "AI Task System Team" }
+]
+keywords = ["claude", "codex", "codebuddy", "ai-agent", "cli", "tui"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "textual>=0.50.0",
+    "rich>=13.0.0",
+    "jsonschema>=4.17.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+ai-task = "ai_task_system.v4.cli:main"
+ai-task-tui = "ai_task_system.v4.tui_app:run"
+ai-task-api = "v5.api.app:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ai_task_system*", "v4*", "v5*"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

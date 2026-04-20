@@ -1,0 +1,17 @@
+# AI Task System 配置文件
+scheduler:
+  poll_interval: 5
+  cli: claude
+  heartbeat_interval: 30  # 心跳更新间隔（秒）
+  stale_threshold: 120   # 僵尸任务判定（秒）
+
+executor:
+  timeout: 1800
+  max_auto_retries: 3     # 自动重试次数
+  auto_retry_delay: 180   # 自动重试延迟（秒）
+
+log:
+  level: INFO
+  file: server.log
+  max_bytes: 10485760
+  backup_count: 5
