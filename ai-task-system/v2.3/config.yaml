@@ -1,0 +1,40 @@
+# AI Task System 配置文件
+scheduler:
+  poll_interval: 5
+  cli: claude
+  heartbeat_interval: 30  # 心跳更新间隔（秒）
+  stale_threshold: 120   # 僵尸任务判定（秒）
+  concurrency: 2         # 并发执行数
+
+executor:
+  engine: cli  # cli | sdk
+  cli_path: claw
+  sdk_path: claw
+  timeout: 1800  # default timeout in seconds
+  max_auto_retries: 3     # 自动重试次数
+  auto_retry_delay: 180   # 自动重试延迟（秒）
+  allowed_tools: "Bash,Read,Edit,Grep,Glob"  # 允许的工具列表
+
+sdk:
+  permission_mode: bypassPermissions  # SDK permission mode
+  model: claude-opus-4-6  # default model
+
+evaluator:
+  api_base: ""             # API 地址，留空使用 CLI 模式
+  model: "claude-opus-4-6" # 评估模型
+  use_cli: true            # true: 使用 claude --print 做评估; false: 使用 API
+  default_model: gpt-4o
+  timeout: 60
+
+database:
+  path: data/tasks.db
+
+server:
+  host: 0.0.0.0
+  port: 8000
+
+log:
+  level: INFO
+  file: server.log
+  max_bytes: 10485760
+  backup_count: 5

@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 任务系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <header class="mb-8 flex justify-between items-start">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">AI 任务系统</h1>
+                <p class="text-gray-600">自动化任务领取、执行与评估</p>
+            </div>
+            <button onclick="openSettings()" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-md flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                设置
+            </button>
+        </header>
+
+        <!-- 调度器控制 -->
+        <div class="bg-white rounded-lg shadow p-4 mb-6 flex justify-between items-center">
+            <div class="flex items-center gap-4">
+                <span class="font-medium">自动调度:</span>
+                <span id="scheduler-status" class="px-3 py-1 rounded-full text-sm font-medium bg-gray-100">检测中...</span>
+            </div>
+            <div class="flex gap-2">
+                <button id="btn-start-scheduler" onclick="startScheduler()" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 hidden">启动调度</button>
+                <button id="btn-stop-scheduler" onclick="stopScheduler()" class="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 hidden">停止调度</button>
+            </div>
+        </div>
+
+        <!-- Settings 弹窗 -->
+        <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+            <div class="bg-white rounded-lg p-6 w-full max-w-md">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">系统设置</h2>
+                    <button onclick="closeSettings()" class="text-gray-500 hover:text-gray-700">&times;</button>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">CLI</label>
+                        <div class="flex gap-4">
+                            <label class="flex items-center"><input type="radio" name="cli" value="claude" checked onchange="updateConfig('cli', 'claude')"> <span class="ml-1">claude</span></label>
+                            <label class="flex items-center"><input type="radio" name="cli" value="codebuddy" onchange="updateConfig('cli', 'codebuddy')"> <span class="ml-1">codebuddy</span></label>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">执行模型（逗号分隔）</label>
+                        <input type="text" id="config-executor-models" onchange="updateConfig('executor_models', this.value)" class="w-full rounded border-gray-300 border px-3 py-2">
+                        <select id="config-default-executor" onchange="updateConfig('default_executor_model', this.value)" class="mt-1 w-full rounded border-gray-300 border px-3 py-2"></select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">评估模型（逗号分隔）</label>
+                        <input type="text" id="config-evaluator-models" onchange="updateConfig('evaluator_models', this.value)" class="w-full rounded border-gray-300 border px-3 py-2">
+                        <select id="config-default-evaluator" onchange="updateConfig('default_evaluator_model', this.value)" class="mt-1 w-full rounded border-gray-300 border px-3 py-2"></select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-4 gap-4 mb-8">
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-2xl font-bold text-blue-600" id="stat-total">0</div>
+                <div class="text-gray-500">总任务</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-2xl font-bold text-yellow-600" id="stat-pending">0</div>
+                <div class="text-gray-500">待执行</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-2xl font-bold text-green-600" id="stat-completed">0</div>
+                <div class="text-gray-500">已完成</div>
+            </div>
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="text-2xl font-bold text-purple-600" id="stat-evaluated">0</div>
+                <div class="text-gray-500">已评估</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-6">
+            <div class="col-span-1">
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-xl font-semibold mb-4">创建新任务</h2>
+                    <form id="task-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">标题</label>
+                            <input type="text" id="task-title" required
+                                class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">描述</label>
+                            <textarea id="task-description" rows="4" required
+                                class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"></textarea>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">执行模型</label>
+                                <select id="executor-model"
+                                    class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2">
+                                    <option value="claude-opus-4-6">Claude Opus</option>
+                                    <option value="claude-sonnet-4-6">Claude Sonnet</option>
+                                    <option value="gpt-4">GPT-4</option>
+                                    <option value="gpt-3.5-turbo">GPT-3.5</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">评估模型</label>
+                                <select id="evaluator-model"
+                                    class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2">
+                                    <option value="gpt-4">GPT-4</option>
+                                    <option value="claude-opus-4-6">Claude Opus</option>
+                                    <option value="claude-sonnet-4-6">Claude Sonnet</option>
+                                </select>
+                            </div>
+                        </div>
+                        <button type="submit"
+                            class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700">
+                            添加任务
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="col-span-2">
+                <div class="bg-white rounded-lg shadow">
+                    <div class="p-4 border-b flex justify-between items-center">
+                        <h2 class="text-xl font-semibold">任务列表</h2>
+                        <div class="flex gap-2">
+                            <button onclick="loadTasks('all')"
+                                class="px-3 py-1 rounded text-sm bg-gray-200 hover:bg-gray-300">全部</button>
+                            <button onclick="loadTasks('waiting')"
+                                class="px-3 py-1 rounded text-sm bg-indigo-100 hover:bg-indigo-200">等待依赖</button>
+                            <button onclick="loadTasks('pending')"
+                                class="px-3 py-1 rounded text-sm bg-yellow-100 hover:bg-yellow-200">待执行</button>
+                            <button onclick="loadTasks('running')"
+                                class="px-3 py-1 rounded text-sm bg-blue-100 hover:bg-blue-200">执行中</button>
+                            <button onclick="loadTasks('evaluated')"
+                                class="px-3 py-1 rounded text-sm bg-green-100 hover:bg-green-200">已完成</button>
+                        </div>
+                    </div>
+                    <div id="task-list" class="p-4 space-y-4"></div>
+                </div>
+            </div>
+        </div>
+
+        <div id="task-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
+            <div class="modal-content bg-white rounded-lg max-w-4xl mx-auto mt-20 max-h-[80vh] overflow-auto">
+                <div class="p-6">
+                    <div class="flex justify-between items-start mb-4">
+                        <h2 class="text-2xl font-semibold" id="modal-title">任务详情</h2>
+                        <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="modal-content"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const API_BASE = '/api';
+
+    // WebSocket for live task updates
+    const SESSION_KEY = 'ai_task_session_id';
+    let wsSessionId = localStorage.getItem(SESSION_KEY) || null;
+    let ws = null;
+
+    function connectWS() {
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        ws = new WebSocket(`${protocol}//${location.host}/ws`);
+
+        ws.onopen = () => {
+            // Send init message with existing session_id for reconnect detection
+            if (wsSessionId) {
+                ws.send(JSON.stringify({type: 'init', client_id: wsSessionId}));
+            }
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'session_assigned') {
+                wsSessionId = data.session_id;
+                localStorage.setItem(SESSION_KEY, wsSessionId);
+            }
+            if (data.type === 'task_update' || data.type === 'task_ready') {
+                updateTaskStatus(data.task_id, data.status);
+            }
+        };
+        ws.onclose = () => setTimeout(connectWS, 3000);
+        ws.onerror = () => ws.close();
+    }
+
+    // Ping interval to keep connection alive
+    setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({type: 'ping'}));
+        }
+    }, 30000);
+
+    function updateTaskStatus(taskId, status) {
+        const card = document.querySelector(`[data-task-id="${taskId}"]`);
+        if (card) {
+            const badge = card.querySelector('.status-badge');
+            if (badge) {
+                badge.textContent = getStatusText(status);
+                badge.className = `inline-block px-2 py-1 text-xs rounded ${getStatusClass(status)}`;
+            }
+        }
+    }
+
+    function getStatusText(status) {
+        const texts = {
+            'pending': '待领取',
+            'running': '执行中',
+            'completed': '已完成',
+            'evaluating': '评估中',
+            'evaluated': '已完成',
+            're-execute': '待重试',
+            'failed': '失败',
+            'cancelled': '已取消',
+            'waiting': '等待依赖'
+        };
+        return texts[status] || status;
+    }
+
+    connectWS();
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function createEl(tag, className, children) {
+        const el = document.createElement(tag);
+        if (className) el.className = className;
+        if (typeof children === 'string') {
+            el.textContent = children;
+        } else if (Array.isArray(children)) {
+            children.forEach(c => el.appendChild(c));
+        } else if (children) {
+            el.appendChild(children);
+        }
+        return el;
+    }
+
+    async function openSettings() {
+        try {
+            const res = await fetch(`${API_BASE}/config`);
+            currentConfig = await res.json();
+            document.querySelectorAll('input[name="cli"]').forEach(r => {
+                r.checked = r.value === currentConfig.cli;
+            });
+            document.getElementById('config-executor-models').value = currentConfig.executor_models || '';
+            document.getElementById('config-default-executor').innerHTML = generateOptions(currentConfig.executor_models, currentConfig.default_executor_model);
+            document.getElementById('config-evaluator-models').value = currentConfig.evaluator_models || '';
+            document.getElementById('config-default-evaluator').innerHTML = generateOptions(currentConfig.evaluator_models, currentConfig.default_evaluator_model);
+            document.getElementById('settings-modal').classList.remove('hidden');
+        } catch (e) { console.error('Failed to load config:', e); }
+    }
+
+    function closeSettings() {
+        document.getElementById('settings-modal').classList.add('hidden');
+        loadConfigToForm();
+    }
+
+    function generateOptions(modelsStr, defaultVal) {
+        if (!modelsStr) return '<option value="">--</option>';
+        return '<option value="">--</option>' + modelsStr.split(',').map(m => {
+            const trimmed = m.trim();
+            return `<option value="${trimmed}" ${trimmed === defaultVal ? 'selected' : ''}>${trimmed}</option>`;
+        }).join('');
+    }
+
+    async function updateConfig(key, value) {
+        try {
+            await fetch(`${API_BASE}/config/${key}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value })
+            });
+        } catch (e) { console.error('Failed to update config:', e); }
+    }
+
+    async function loadConfigToForm() {
+        try {
+            const res = await fetch(`${API_BASE}/config`);
+            const cfg = await res.json();
+            const execSelect = document.getElementById('executor-model');
+            const evalSelect = document.getElementById('evaluator-model');
+            if (execSelect && cfg.executor_models) {
+                execSelect.innerHTML = generateOptions(cfg.executor_models, cfg.default_executor_model || '');
+            }
+            if (evalSelect && cfg.evaluator_models) {
+                evalSelect.innerHTML = generateOptions(cfg.evaluator_models, cfg.default_evaluator_model || '');
+            }
+        } catch (e) { console.error('Failed to load config:', e); }
+    }
+
+    async function retryTask(taskId) {
+        try {
+            await fetch(`${API_BASE}/tasks/${taskId}/retry`, { method: 'POST' });
+            loadTasks();
+            loadStats();
+        } catch (e) { console.error('Failed to retry task:', e); }
+    }
+
+    async function deleteAllTasks() {
+        if (!confirm('确认删除所有任务？')) return;
+        try {
+            await fetch(`${API_BASE}/tasks`, { method: 'DELETE' });
+            loadTasks();
+            loadStats();
+        } catch (e) { console.error('Failed to delete all:', e); }
+    }
+
+    async function loadSchedulerStatus() {
+        try {
+            const res = await fetch(`${API_BASE}/scheduler/status`);
+            const data = await res.json();
+            const statusEl = document.getElementById('scheduler-status');
+            const startBtn = document.getElementById('btn-start-scheduler');
+            const stopBtn = document.getElementById('btn-stop-scheduler');
+            if (data.running) {
+                statusEl.textContent = '运行中';
+                statusEl.className = 'px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800';
+                startBtn.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+            } else {
+                statusEl.textContent = '已停止';
+                statusEl.className = 'px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800';
+                startBtn.classList.remove('hidden');
+                stopBtn.classList.add('hidden');
+            }
+        } catch (e) { console.error('Failed to load scheduler status:', e); }
+    }
+
+    async function startScheduler() {
+        try {
+            await fetch(`${API_BASE}/scheduler/start`, { method: 'POST' });
+            loadSchedulerStatus();
+        } catch (e) { console.error('Failed to start scheduler:', e); }
+    }
+
+    async function stopScheduler() {
+        try {
+            await fetch(`${API_BASE}/scheduler/stop`, { method: 'POST' });
+            loadSchedulerStatus();
+        } catch (e) { console.error('Failed to stop scheduler:', e); }
+    }
+
+    async function loadTasks(filter) {
+        filter = filter || 'all';
+        currentFilter = filter;
+        currentPage = 1;
+        try {
+            const params = new URLSearchParams({status: filter === 'all' ? '' : filter, page: currentPage, page_size: currentPageSize});
+            const res = await fetch(`${API_BASE}/tasks?${params}`);
+            const data = await res.json();
+            renderTaskList(data.tasks || []);
+            totalPages = data.total_pages || 1;
+            updatePagination();
+        } catch (e) { console.error('Failed to load tasks:', e); }
+    }
+
+    function updatePagination() {
+        document.getElementById('page-info').textContent = `第 ${currentPage} 页 / 共 ${totalPages} 页`;
+        document.getElementById('btn-prev').disabled = currentPage <= 1;
+        document.getElementById('btn-next').disabled = currentPage >= totalPages;
+    }
+
+    function changePage(delta) {
+        currentPage = Math.max(1, Math.min(totalPages, currentPage + delta));
+        loadTasks(currentFilter);
+    }
+
+    function setFilter(filter) {
+        currentFilter = filter;
+        currentPage = 1;
+        loadTasks(filter);
+    }
+
+    function getFilterName(filter) {
+        const names = {all:'全部', pending:'待执行', running:'进行中', completed:'已完成', failed:'失败', evaluated:'已评估'};
+        return names[filter] || filter;
+    }
+
+    async function loadStats() {
+        try {
+            const res = await fetch(`${API_BASE}/stats`);
+            const stats = await res.json();
+            document.getElementById('stat-total').textContent = stats.total || 0;
+            document.getElementById('stat-pending').textContent = stats.pending || 0;
+            document.getElementById('stat-completed').textContent = stats.completed || 0;
+            document.getElementById('stat-evaluated').textContent = stats.evaluated || 0;
+        } catch (e) { console.error('Failed to load stats:', e); }
+    }
+
+    async function loadTasks(filter) {
+        filter = filter || 'all';
+        try {
+            const url = filter === 'all' ? `${API_BASE}/tasks` : `${API_BASE}/tasks?status=${filter}`;
+            const res = await fetch(url);
+            const tasks = await res.json();
+            renderTaskList(Array.isArray(tasks) ? tasks : []);
+        } catch (e) { console.error('Failed to load tasks:', e); }
+    }
+
+    function getStatusClass(status) {
+        const classes = {
+            'pending': 'bg-yellow-100 text-yellow-800',
+            'running': 'bg-blue-100 text-blue-800',
+            'completed': 'bg-green-100 text-green-800',
+            'evaluating': 'bg-purple-100 text-purple-800',
+            'evaluated': 'bg-gray-100 text-gray-800',
+            're-execute': 'bg-orange-100 text-orange-800',
+            'failed': 'bg-red-100 text-red-800',
+            'cancelled': 'bg-gray-200 text-gray-600',
+            'waiting': 'bg-indigo-100 text-indigo-800'
+        };
+        return classes[status] || 'bg-gray-100 text-gray-800';
+    }
+
+    function renderTaskList(tasks) {
+        const container = document.getElementById('task-list');
+        container.innerHTML = '';
+        if (tasks.length === 0) {
+            container.appendChild(createEl('p', 'text-gray-500 text-center py-8', '暂无任务'));
+            return;
+        }
+        tasks.forEach(task => {
+            const card = createEl('div', 'border rounded-lg p-4 hover:shadow-md cursor-pointer transition');
+            card.setAttribute('data-task-id', task.id);
+            card.onclick = () => showTaskDetail(task.id);
+
+            const delBtn = createEl('button', 'text-red-500 hover:text-red-700');
+            delBtn.onclick = (e) => { e.stopPropagation(); deleteTask(task.id); };
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            svg.setAttribute('class', 'w-5 h-5');
+            svg.setAttribute('fill', 'none');
+            svg.setAttribute('stroke', 'currentColor');
+            svg.setAttribute('viewBox', '0 0 24 24');
+            svg.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>';
+            delBtn.appendChild(svg);
+
+            const header = createEl('div', 'flex justify-between items-start');
+            const titleDiv = createEl('div', '', [
+                createEl('span', `inline-block px-2 py-1 text-xs rounded ${getStatusClass(task.status)}`, getStatusText(task.status)),
+                createEl('h3', 'font-semibold mt-2', task.title || '')
+            ]);
+            header.appendChild(titleDiv);
+            header.appendChild(delBtn);
+            card.appendChild(header);
+
+            const meta = createEl('div', 'text-sm text-gray-500 mt-2',
+                `执行: ${task.executor_model || ''} | 评估: ${task.evaluator_model || ''}`);
+            card.appendChild(meta);
+
+            const time = createEl('div', 'text-sm text-gray-400 mt-1',
+                task.created_at ? new Date(task.created_at).toLocaleString() : '');
+            card.appendChild(time);
+
+            container.appendChild(card);
+        });
+    }
+
+    async function showTaskDetail(taskId) {
+        try {
+            const res = await fetch(`${API_BASE}/tasks/${taskId}`);
+            const task = await res.json();
+
+            const execRes = await fetch(`${API_BASE}/tasks/${taskId}/executions`);
+            const executions = await execRes.json();
+
+            const evalRes = await fetch(`${API_BASE}/tasks/${taskId}/evaluations`);
+            const evaluations = await evalRes.json();
+
+            // Fetch diff data for execution pairs
+            let diffMap = {};
+            try {
+                const diffRes = await fetch(`${API_BASE}/tasks/${taskId}/executions/diff`);
+                const diffs = await diffRes.json();
+                diffs.forEach(d => { diffMap[d.exec2_id] = d; });
+            } catch (_) {}
+
+            const modal = document.getElementById('task-modal');
+            const content = document.getElementById('modal-content');
+            content.innerHTML = '';
+
+            const infoSection = createEl('div', '', [
+                createEl('h3', 'font-semibold text-lg mb-2', '基本信息'),
+                createEl('div', 'bg-gray-50 rounded-lg p-4 space-y-2', [
+                    createEl('p', '', [createEl('strong', '', '状态: '), createEl('span', `px-2 py-1 rounded ${getStatusClass(task.status)}`, getStatusText(task.status))]),
+                    createEl('p', '', [createEl('strong', '', '描述: '), createEl('span', '', task.description || '')]),
+                    createEl('p', '', [createEl('strong', '', '执行模型: '), createEl('span', '', task.executor_model || '')]),
+                    createEl('p', '', [createEl('strong', '', '评估模型: '), createEl('span', '', task.evaluator_model || '')]),
+                    createEl('p', '', [createEl('strong', '', '迭代: '), createEl('span', '', `${task.iteration_count || 0} / ${task.max_iterations || 3}`)]),
+                    createEl('p', '', [createEl('strong', '', '评分阈值: '), createEl('span', '', String(task.improvement_threshold || 7))])
+                ])
+            ]);
+            content.appendChild(infoSection);
+
+            const execSection = createEl('div', 'mt-6', [createEl('h3', 'font-semibold text-lg mb-2', '执行历史')]);
+            if (!executions || executions.length === 0) {
+                execSection.appendChild(createEl('p', 'text-gray-500', '暂无执行记录'));
+            } else {
+                executions.forEach(ex => {
+                    const execCard = createEl('div', 'bg-blue-50 rounded-lg p-4 mb-2', [
+                        createEl('p', '', [createEl('strong', '', '模型: '), createEl('span', '', ex.executor_model || '')]),
+                        createEl('p', '', [createEl('strong', '', '开始: '), createEl('span', '', ex.started_at ? new Date(ex.started_at).toLocaleString() : '-')]),
+                        createEl('p', '', [createEl('strong', '', '完成: '), createEl('span', '', ex.completed_at ? new Date(ex.completed_at).toLocaleString() : '-')])
+                    ]);
+
+                    // Diff button if diff data is available
+                    const diff = diffMap[ex.id];
+                    if (diff && diff.diff_lines && diff.diff_lines.length > 0) {
+                        const diffDivId = `diff-${ex.id}`;
+                        const diffBtn = createEl('button', 'text-sm text-blue-600 underline mt-1 mr-2', 'Diff');
+                        diffBtn.style.cssText = 'background:none;border:none;cursor:pointer;padding:0;';
+                        const diffContent = createEl('div', 'hidden mt-2', []);
+                        diffContent.id = diffDivId;
+                        diffBtn.onclick = () => {
+                            const hidden = diffContent.classList.contains('hidden');
+                            if (hidden) {
+                                diffContent.classList.remove('hidden');
+                                diffBtn.textContent = 'Hide Diff';
+                            } else {
+                                diffContent.classList.add('hidden');
+                                diffBtn.textContent = 'Diff';
+                            }
+                        };
+                        const diffLines = diff.diff_lines.map(line => {
+                            if (line.startsWith('+')) {
+                                return createEl('div', 'bg-green-100 text-green-800 px-2', `+ ${line.slice(1)}`);
+                            } else if (line.startsWith('-')) {
+                                return createEl('div', 'bg-red-100 text-red-800 px-2', `- ${line.slice(1)}`);
+                            } else if (line.startsWith('^') || line.startsWith('\ No newline') || line === '---' || line === '+++') {
+                                return createEl('div', 'text-gray-400 px-2', line);
+                            } else {
+                                return createEl('div', 'text-gray-600 px-2', line || ' ');
+                            }
+                        });
+                        diffContent.append(...diffLines);
+                        const btnRow = createEl('div', 'flex items-center mt-1', [diffBtn]);
+                        execCard.appendChild(btnRow);
+                        execCard.appendChild(diffContent);
+                    }
+
+                    if (ex.output) {
+                        execCard.appendChild(createEl('p', '', [createEl('strong', '', '输出:')]));
+                        execCard.appendChild(createEl('pre', 'bg-gray-100 p-2 rounded mt-1 overflow-auto max-h-40', ex.output || ''));
+                    }
+                    if (ex.error) {
+                        execCard.appendChild(createEl('p', 'text-red-600', [createEl('strong', '', '错误: '), createEl('span', '', ex.error)]));
+                    }
+                    execSection.appendChild(execCard);
+                });
+            }
+            content.appendChild(execSection);
+
+            const evalSection = createEl('div', 'mt-6', [createEl('h3', 'font-semibold text-lg mb-2', '评估历史')]);
+            if (!evaluations || evaluations.length === 0) {
+                evalSection.appendChild(createEl('p', 'text-gray-500', '暂无评估记录'));
+            } else {
+                evaluations.forEach(ev => {
+                    const evalCard = createEl('div', 'bg-green-50 rounded-lg p-4 mb-2', [
+                        createEl('p', '', [createEl('strong', '', '评估模型: '), createEl('span', '', ev.evaluator_model || '')]),
+                        createEl('p', '', [createEl('strong', '', '评分: '), createEl('span', 'text-green-600 font-bold', `${ev.score}/10`)]),
+                        createEl('p', '', [createEl('strong', '', '时间: '), createEl('span', '', ev.created_at ? new Date(ev.created_at).toLocaleString() : '-')])
+                    ]);
+                    if (ev.comments) {
+                        evalCard.appendChild(createEl('pre', 'bg-white p-2 rounded mt-1 overflow-auto max-h-40', ev.comments));
+                    }
+                    evalSection.appendChild(evalCard);
+                });
+            }
+            content.appendChild(evalSection);
+
+            if (task.feedback_md) {
+                const feedbackSection = createEl('div', 'mt-6', [
+                    createEl('h3', 'font-semibold text-lg mb-2', '反馈'),
+                    createEl('pre', 'bg-orange-50 p-4 rounded-lg overflow-auto max-h-60', task.feedback_md)
+                ]);
+                content.appendChild(feedbackSection);
+            }
+
+            modal.classList.remove('hidden');
+            document.getElementById('modal-title').textContent = task.title || '任务详情';
+        } catch (e) { console.error('Failed to load task detail:', e); }
+    }
+
+    function closeModal() {
+        document.getElementById('task-modal').classList.add('hidden');
+    }
+
+    async function deleteTask(taskId) {
+        if (!confirm('确定要删除这个任务吗？')) return;
+        try {
+            await fetch(`${API_BASE}/tasks/${taskId}`, { method: 'DELETE' });
+            loadTasks();
+            loadStats();
+        } catch (e) { console.error('Failed to delete task:', e); }
+    }
+
+    document.getElementById('task-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const data = {
+            title: document.getElementById('task-title').value,
+            description: document.getElementById('task-description').value,
+            executor_model: document.getElementById('executor-model').value,
+            evaluator_model: document.getElementById('evaluator-model').value
+        };
+        try {
+            await fetch(`${API_BASE}/tasks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+            e.target.reset();
+            loadTasks();
+            loadStats();
+        } catch (e) { console.error('Failed to create task:', e); }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeModal();
+    });
+
+    loadTasks();
+    loadStats();
+    loadSchedulerStatus();
+    loadConfigToForm();
+    // Reduce polling frequency since WebSocket handles live updates
+    setInterval(loadTasks, 15000);
+    </script>
+</body>
+</html>
