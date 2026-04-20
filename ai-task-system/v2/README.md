@@ -2,7 +2,21 @@
 
 个人 AI 领取任务系统，支持 Web UI 任务管理、自动领取执行、交叉评估、迭代闭环。
 
+支持**双执行引擎**（Claude Code / CodeBuddy）、**心跳监控**、**自动重试**和**服务重启恢复**。
+
 ## 功能特性
+
+### 双执行引擎
+- **`claude --print --verbose`** — Claude Code CLI，headless 无交互模式
+- **`codebuddy -p`** — CodeBuddy CLI，headless 无交互模式
+- 通过 `config.yaml` 配置使用哪个引擎
+
+### 可靠性保障
+- **心跳机制**（Heartbeat）— 调度器每 30s 更新一次心跳，超 120s 无心跳判定为 stale 僵尸任务
+- **自动重试** — 失败任务最多自动重试 3 次，间隔 180s
+- **服务重启恢复** — 启动时自动扫描 running 任务，恢复 stale 任务至 pending
+- **Exit Code 检测** — 根据 CLI 返回码判断成功/失败
+
 
 - **Web UI 任务管理** - 可视化界面添加、删除、查看任务
 - **自动领取执行** - 调度器自动从任务池领取 pending 任务并执行
