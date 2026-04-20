@@ -126,7 +126,7 @@
         </div>
 
         <div id="task-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
-            <div class="modal-content bg-white rounded-lg max-w-4xl mx-auto mt-20 max-h-[80vh] flex flex-col">
+            <div class="modal-content bg-white rounded-lg max-w-5xl mx-auto mt-20 max-h-[85vh] flex flex-col">
                 <div class="sticky top-0 bg-white p-6 pb-4 border-b flex justify-between items-center z-10">
                     <h2 class="text-2xl font-semibold" id="modal-title">任务详情</h2>
                     <div class="flex gap-2">
@@ -610,7 +610,7 @@
             }
 
             // === 执行历史 + 评估历史 并排两栏 ===
-            const columnsDiv = createEl('div', 'grid grid-cols-2 gap-4');
+            const columnsDiv = createEl('div', 'grid grid-cols-2 gap-6');
 
             // 左栏：执行历史
             const execCol = createEl('div', '');
@@ -636,7 +636,7 @@
                 if (latestExec.output) {
                     const outDiv = createEl('div', 'mb-2');
                     outDiv.innerHTML = `<span class="text-gray-400">输出:</span>`;
-                    const outPre = createEl('pre', 'bg-slate-50 p-2 rounded mt-1 text-xs max-h-32 overflow-auto whitespace-pre-wrap break-words');
+                    const outPre = createEl('pre', 'bg-slate-50 p-3 rounded mt-1 text-xs max-h-48 overflow-auto whitespace-pre-wrap break-words');
                     outPre.textContent = latestExec.output || '';
                     outDiv.appendChild(outPre);
                     execCard.appendChild(outDiv);
@@ -674,7 +674,7 @@
 
                 // 评估内容
                 if (latestEval.comments) {
-                    const evalContent = createEl('pre', 'text-gray-700 whitespace-pre-wrap break-words text-xs max-h-48 overflow-auto');
+                    const evalContent = createEl('pre', 'text-gray-700 whitespace-pre-wrap break-words text-xs max-h-56 overflow-auto');
                     evalContent.textContent = latestEval.comments;
                     evalCard.appendChild(evalContent);
                 }
@@ -688,10 +688,16 @@
 
             // === 反馈区（评分不足时显示）===
             if (task.feedback_md) {
+                // 提取一句话改进建议
+                let suggestion = task.feedback_md;
+                const match = task.feedback_md.match(/[\*_]?一句话改进建议[\*_]?[:：]\s*(.+?)(?=\n|$)/s);
+                if (match) {
+                    suggestion = match[1].trim();
+                }
                 const feedbackSection = createEl('div', 'mt-4 pt-4 border-t');
                 feedbackSection.innerHTML = `
                     <h4 class="text-sm font-medium text-orange-500 mb-2">📝 改进建议</h4>
-                    <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words bg-orange-50 p-3 rounded-lg max-h-40 overflow-auto">${escapeHtml(task.feedback_md)}</pre>
+                    <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words bg-orange-50 p-3 rounded-lg max-h-48 overflow-auto">${escapeHtml(suggestion)}</pre>
                 `;
                 content.appendChild(feedbackSection);
             }

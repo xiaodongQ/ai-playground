@@ -14,7 +14,8 @@ class Evaluator:
 {execution_output}
 
 ## 评估
-评分 X/10，一句话改进建议：
+评分: X/10
+一句话改进建议: （必须输出，用一句话说明如何改进）
 """
 
     def __init__(self, default_model: str = None):

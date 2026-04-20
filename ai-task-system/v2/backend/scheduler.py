@@ -107,14 +107,19 @@ class Scheduler:
         logger.info(f"{task_info} | session_id: {session_id}")
         logger.info(f"{task_info} | 任务描述: {task.description[:100]}{'...' if len(task.description) > 100 else ''}")
 
-        execution = await self.db.create_execution(task.id, task.executor_model)
-        logger.info(f"{task_info} | 执行命令...")
-        output, error, cmd, exit_code = await self.executor.execute(
+        # 执行前先构建命令并存储（便于 UI 实时显示）
+        cmd = self.executor.build_command(
+            task.id, task.description,
+            model=task.executor_model, session_id=session_id,
+            allowed_tools=self.executor.allowed_tools
+        )
+        execution = await self.db.create_execution(task.id, task.executor_model, command=cmd)
+        logger.info(f"{task_info} | 执行命令: {cmd}")
+        output, error, _, exit_code = await self.executor.execute(
             task.id, task.description, task.feedback_md,
             model=task.executor_model, session_id=session_id,
             allowed_tools=self.executor.allowed_tools
         )
-        logger.info(f"{task_info} | 命令: {cmd}")
 
         # 执行完成后更新 execution（带 exit_code）
         await self.db.update_execution(execution.id, output, error, command=cmd, exit_code=exit_code)
