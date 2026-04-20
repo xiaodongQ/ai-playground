@@ -31,6 +31,12 @@ async def health():
 
 @app.on_event("startup")
 async def startup_event():
+    # 确保 data 目录存在
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir)
+        logger.info(f"创建数据目录: {data_dir}")
+
     logger.info("=" * 50)
     logger.info("AI Task System 启动恢复")
     logger.info("=" * 50)

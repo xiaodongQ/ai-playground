@@ -23,10 +23,11 @@
         </header>
 
         <!-- 调度器控制 -->
-        <div class="bg-white rounded-lg shadow p-4 mb-6 flex justify-between items-center">
+        <div id="scheduler-banner" class="bg-white rounded-lg shadow p-4 mb-6 flex justify-between items-center">
             <div class="flex items-center gap-4">
                 <span class="font-medium">自动调度:</span>
                 <span id="scheduler-status" class="px-3 py-1 rounded-full text-sm font-medium bg-gray-100">检测中...</span>
+                <span id="scheduler-hint" class="text-sm text-red-500 font-medium hidden">⚠ 调度未启动，任务不会自动执行</span>
             </div>
             <div class="flex gap-2">
                 <button id="btn-start-scheduler" onclick="startScheduler()" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 hidden">
@@ -333,17 +334,20 @@
             const statusEl = document.getElementById('scheduler-status');
             const startBtn = document.getElementById('btn-start-scheduler');
             const stopBtn = document.getElementById('btn-stop-scheduler');
+            const hintEl = document.getElementById('scheduler-hint');
 
             if (data.running) {
                 statusEl.textContent = '运行中';
                 statusEl.className = 'px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800';
                 startBtn.classList.add('hidden');
                 stopBtn.classList.remove('hidden');
+                hintEl.classList.add('hidden');
             } else {
                 statusEl.textContent = '已停止';
                 statusEl.className = 'px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800';
                 startBtn.classList.remove('hidden');
                 stopBtn.classList.add('hidden');
+                hintEl.classList.remove('hidden');
             }
         } catch (e) { console.error('Failed to load scheduler status:', e); }
     }
@@ -416,7 +420,8 @@
             'completed': 'bg-green-100 text-green-800',
             'evaluating': 'bg-purple-100 text-purple-800',
             're-execute': 'bg-orange-100 text-orange-800',
-            'failed': 'bg-red-100 text-red-800'
+            'failed': 'bg-red-100 text-red-800',
+            'waiting_input': 'bg-yellow-200 text-yellow-900 border border-yellow-400'
         };
         return classes[status] || 'bg-gray-100 text-gray-800';
     }
@@ -428,7 +433,8 @@
             'completed': '已完成',
             'evaluating': '评估中',
             're-execute': '待重试',
-            'failed': '失败'
+            'failed': '失败',
+            'waiting_input': '待确认'
         };
         return texts[status] || status;
     }
@@ -455,17 +461,23 @@
             delBtn.appendChild(svg);
 
             const header = createEl('div', 'flex justify-between items-start');
-            const titleDiv = createEl('div', '', [
+            const titleDiv = createEl('div', 'flex items-center gap-2', [
                 createEl('span', `inline-block px-2 py-1 text-xs rounded ${getStatusClass(task.status)}`, getStatusText(task.status)),
-                createEl('h3', 'font-semibold mt-2', task.title || '')
+                createEl('h3', 'font-semibold', task.title || '')
             ]);
+            // 评分显示
+            if (task.score !== null && task.score !== undefined) {
+                const scoreBadge = createEl('span', task.score >= 7 ? 'text-green-600 font-bold text-sm' : 'text-red-500 font-bold text-sm');
+                scoreBadge.textContent = `${task.score}/10`;
+                titleDiv.appendChild(scoreBadge);
+            }
             header.appendChild(titleDiv);
             header.appendChild(delBtn);
             card.appendChild(header);
 
-            const meta = createEl('div', 'text-sm text-gray-500 mt-2', [
-                createEl('span', '', `执行: ${task.executor_model || ''} | 评估: ${task.evaluator_model || ''}`)
-            ]);
+            const meta = createEl('div', 'text-sm text-gray-500 mt-2 flex items-center gap-2');
+            const execSpan = createEl('span', '', `执行: ${task.executor_model || ''} | 评估: ${task.evaluator_model || ''}`);
+            meta.appendChild(execSpan);
             if (task.retry_count > 0) {
                 const retrySpan = createEl('span', 'text-orange-500 text-xs ml-2');
                 retrySpan.textContent = `(第${task.retry_count}次尝试)`;
@@ -477,8 +489,72 @@
                 task.created_at ? new Date(task.created_at).toLocaleString() : '');
             card.appendChild(time);
 
+            // 等待输入的任务显示回复区域
+            if (task.status === 'waiting_input' && task.pending_input) {
+                const inputArea = createEl('div', 'mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg');
+                const hint = createEl('p', 'text-xs text-yellow-700 mb-2', 'AI 需要确认：');
+                inputArea.appendChild(hint);
+
+                const preview = createEl('p', 'text-xs text-gray-600 mb-2 truncate', task.pending_input);
+                inputArea.appendChild(preview);
+
+                const inputRow = createEl('div', 'flex gap-2');
+                const input = createEl('input', 'flex-1 border rounded px-2 py-1 text-sm');
+                input.type = 'text';
+                input.placeholder = '输入回复...';
+                input.id = `input-${task.id}`;
+
+                const sendBtn = createEl('button', 'px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600');
+                sendBtn.textContent = '发送';
+                sendBtn.onclick = () => continueTask(task.id);
+
+                inputRow.appendChild(input);
+                inputRow.appendChild(sendBtn);
+                inputArea.appendChild(inputRow);
+                card.appendChild(inputArea);
+            }
+
             container.appendChild(card);
         });
+    }
+
+    async function continueTask(taskId) {
+        const input = document.getElementById(`input-${taskId}`);
+        if (!input) return;
+        const userInput = input.value.trim();
+        if (!userInput) {
+            alert('请输入回复内容');
+            return;
+        }
+        try {
+            const res = await fetch(`${API_BASE}/tasks/${taskId}/continue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_input: userInput })
+            });
+            if (res.ok) {
+                input.value = '';
+                loadTasks();
+                loadStats();
+            } else {
+                const err = await res.json();
+                alert('发送失败: ' + (err.detail || '未知错误'));
+            }
+        } catch (e) {
+            console.error('Failed to continue task:', e);
+            alert('发送失败');
+        }
+    }
+
+    function formatTime(ts) {
+        if (!ts) return '-';
+        return new Date(ts).toISOString().slice(0,19).replace('T',' ');
+    }
+
+    function renderStars(score) {
+        const full = Math.round(score / 2);
+        const empty = 5 - full;
+        return '★'.repeat(full) + '☆'.repeat(empty);
     }
 
     async function showTaskDetail(taskId) {
@@ -501,109 +577,134 @@
             const evalRes = await fetch(`${API_BASE}/tasks/${taskId}/evaluations`);
             const evaluations = evalRes.ok ? await evalRes.json() : [];
 
-            // 清空加载中，准备渲染内容
             content.innerHTML = '';
 
-            const infoSection = createEl('div', '', [
-                createEl('h3', 'font-semibold text-lg mb-2', '基本信息'),
-                createEl('div', 'bg-gray-50 rounded-lg p-4 space-y-2', [
-                    createEl('p', '', [createEl('strong', '', '状态: '), createEl('span', `px-2 py-1 rounded ${getStatusClass(task.status)}`, getStatusText(task.status))]),
-                    createEl('p', '', [createEl('strong', '', '描述: '), createEl('span', '', task.description || '')]),
-                    createEl('p', '', [createEl('strong', '', '执行模型: '), createEl('span', '', task.executor_model || '')]),
-                    createEl('p', '', [createEl('strong', '', '评估模型: '), createEl('span', '', task.evaluator_model || '')]),
-                    createEl('p', '', [createEl('strong', '', '迭代: '), createEl('span', '', `${task.iteration_count || 0} / ${task.max_iterations || 3}`)]),
-                    createEl('p', '', [createEl('strong', '', '评分阈值: '), createEl('span', '', String(task.improvement_threshold || 7))])
-                ])
-            ]);
+            // === 顶部信息区：紧凑横排 ===
+            const infoRow = createEl('div', 'flex flex-wrap gap-4 items-center text-sm border-b pb-4 mb-4');
+            infoRow.innerHTML = `
+                <span class="px-2 py-0.5 rounded text-xs ${getStatusClass(task.status)}">${getStatusText(task.status)}</span>
+                <span class="text-gray-600">执行: <span class="text-gray-900">${task.executor_model || 'CLI默认'}</span></span>
+                <span class="text-gray-600">评估: <span class="text-gray-900">${task.evaluator_model || 'CLI默认'}</span></span>
+                <span class="text-gray-600">迭代: <span class="text-gray-900">${task.iteration_count || 0}/${task.max_iterations || 3}</span></span>
+                ${task.feedback_md ? `<span class="text-orange-500 text-xs">⚠ 评分不足</span>` : ''}
+            `;
+            content.appendChild(infoRow);
 
-            // 添加 running 计时器
-            if (task.status === 'running') {
-                const startTime = task.started_at ? new Date(task.started_at) : new Date();
-                const timerDiv = createEl('div', 'text-blue-600 font-medium mt-2');
-                timerDiv.id = 'running-timer';
+            // === 命令预览（执行前就显示） ===
+            const latestExec = executions && executions.length > 0 ? executions[0] : null;
+            const pendingCmd = task.status === 'pending' || task.status === 're-execute';
+            if (pendingCmd) {
+                // 还没执行过，根据任务构建预览命令
+                const modelArg = task.executor_model ? ` --model ${task.executor_model}` : '';
+                const previewCmd = `claude --print --verbose${modelArg} "${task.description}"`;
+                const cmdPreview = createEl('div', 'mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs');
+                cmdPreview.innerHTML = `<span class="text-blue-600 font-medium">命令预览:</span><br><code class="block bg-white p-2 rounded mt-1 break-all text-gray-800">${escapeHtml(previewCmd)}</code>`;
+                content.appendChild(cmdPreview);
+            }
 
-                function updateTimer() {
-                    const elapsed = Math.floor((new Date() - startTime) / 1000);
-                    const mins = Math.floor(elapsed / 60);
-                    const secs = elapsed % 60;
-                    timerDiv.textContent = `已运行: ${mins}分${secs}秒`;
+            // === 任务描述 ===
+            if (task.description) {
+                const descDiv = createEl('div', 'text-sm text-gray-600 mb-4');
+                descDiv.innerHTML = `<span class="text-gray-400">描述:</span> ${escapeHtml(task.description)}`;
+                content.appendChild(descDiv);
+            }
+
+            // === 执行历史 + 评估历史 并排两栏 ===
+            const columnsDiv = createEl('div', 'grid grid-cols-2 gap-4');
+
+            // 左栏：执行历史
+            const execCol = createEl('div', '');
+            execCol.appendChild(createEl('h4', 'text-sm font-medium text-gray-500 mb-2', '执行'));
+
+            if (!executions || executions.length === 0) {
+                execCol.appendChild(createEl('p', 'text-xs text-gray-400', '暂无执行记录'));
+            } else {
+                const latestExec = executions[0]; // 只显示最新一次
+                const execCard = createEl('div', 'border rounded-lg p-3 text-xs', '');
+
+                // 命令（可复制）
+                const cmdDiv = createEl('div', 'mb-2');
+                cmdDiv.innerHTML = `<span class="text-gray-400">命令:</span><br><code class="block bg-slate-100 p-2 rounded mt-1 break-all text-xs">${escapeHtml(latestExec.command || '-')}</code>`;
+                execCard.appendChild(cmdDiv);
+
+                // 时间
+                const timeDiv = createEl('div', 'text-gray-500 mb-2');
+                timeDiv.innerHTML = `开始: ${formatTime(latestExec.started_at)}<br>完成: ${formatTime(latestExec.completed_at)}`;
+                execCard.appendChild(timeDiv);
+
+                // 输出
+                if (latestExec.output) {
+                    const outDiv = createEl('div', 'mb-2');
+                    outDiv.innerHTML = `<span class="text-gray-400">输出:</span>`;
+                    const outPre = createEl('pre', 'bg-slate-50 p-2 rounded mt-1 text-xs max-h-32 overflow-auto whitespace-pre-wrap break-words');
+                    outPre.textContent = latestExec.output || '';
+                    outDiv.appendChild(outPre);
+                    execCard.appendChild(outDiv);
                 }
-                updateTimer();
-                setInterval(updateTimer, 1000);
-                infoSection.querySelector('.bg-gray-50').appendChild(timerDiv);
+
+                // 错误
+                if (latestExec.error) {
+                    const errDiv = createEl('div', 'text-red-600 text-xs');
+                    errDiv.textContent = `错误: ${latestExec.error}`;
+                    execCard.appendChild(errDiv);
+                }
+
+                execCol.appendChild(execCard);
             }
 
-            // 添加迭代进度条
-            if (task.iteration_count !== undefined && task.max_iterations) {
-                const progressDiv = createEl('div', 'flex items-center gap-2 mt-2');
-                const filled = '█'.repeat(task.iteration_count || 0);
-                const empty = '░'.repeat((task.max_iterations || 3) - (task.iteration_count || 0));
-                progressDiv.innerHTML = `<span class="text-orange-600">${filled}${empty}</span> <span>${task.iteration_count || 0}/${task.max_iterations || 3}</span>`;
-                infoSection.querySelector('.bg-gray-50').appendChild(progressDiv);
+            // 右栏：评估历史
+            const evalCol = createEl('div', '');
+            evalCol.appendChild(createEl('h4', 'text-sm font-medium text-gray-500 mb-2', '评估'));
+
+            if (!evaluations || evaluations.length === 0) {
+                evalCol.appendChild(createEl('p', 'text-xs text-gray-400', '暂无评估记录'));
+            } else {
+                const latestEval = evaluations[0];
+                const evalCard = createEl('div', 'border-l-4 border-green-400 pl-3 text-xs', '');
+
+                // 评分星级
+                const scoreDiv = createEl('div', 'flex items-center gap-2 mb-2');
+                scoreDiv.innerHTML = `<span class="text-2xl text-green-500 font-bold">${latestEval.score}</span><span class="text-gray-400">/10</span><span class="text-green-400">${renderStars(latestEval.score)}</span>`;
+                evalCard.appendChild(scoreDiv);
+
+                // 评估模型和时间
+                const evalMeta = createEl('div', 'text-gray-500 mb-2 text-xs');
+                evalMeta.innerHTML = `${latestEval.evaluator_model || ''} · ${formatTime(latestEval.created_at)}`;
+                evalCard.appendChild(evalMeta);
+
+                // 评估内容
+                if (latestEval.comments) {
+                    const evalContent = createEl('pre', 'text-gray-700 whitespace-pre-wrap break-words text-xs max-h-48 overflow-auto');
+                    evalContent.textContent = latestEval.comments;
+                    evalCard.appendChild(evalContent);
+                }
+
+                evalCol.appendChild(evalCard);
             }
 
-            content.appendChild(infoSection);
+            columnsDiv.appendChild(execCol);
+            columnsDiv.appendChild(evalCol);
+            content.appendChild(columnsDiv);
 
-            // 操作按钮区域
-            const actionDiv = createEl('div', 'flex gap-2 mt-4');
+            // === 反馈区（评分不足时显示）===
+            if (task.feedback_md) {
+                const feedbackSection = createEl('div', 'mt-4 pt-4 border-t');
+                feedbackSection.innerHTML = `
+                    <h4 class="text-sm font-medium text-orange-500 mb-2">📝 改进建议</h4>
+                    <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words bg-orange-50 p-3 rounded-lg max-h-40 overflow-auto">${escapeHtml(task.feedback_md)}</pre>
+                `;
+                content.appendChild(feedbackSection);
+            }
+
+            // === 操作按钮 ===
+            const actionDiv = createEl('div', 'flex gap-2 mt-4 pt-4 border-t');
             if (task.status === 'failed' || task.status === 'completed') {
-                const retryBtn = createEl('button', 'px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700');
+                const retryBtn = createEl('button', 'px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 text-sm');
                 retryBtn.onclick = () => retryTask(task.id);
-                retryBtn.textContent = '🔄 重试此任务';
+                retryBtn.textContent = '重试任务';
                 actionDiv.appendChild(retryBtn);
             }
             content.appendChild(actionDiv);
-
-            const execSection = createEl('div', 'mt-6', [createEl('h3', 'font-semibold text-lg mb-2', '执行历史')]);
-            if (!executions || executions.length === 0) {
-                execSection.appendChild(createEl('p', 'text-gray-500', '暂无执行记录'));
-            } else {
-                executions.forEach(ex => {
-                    const execCard = createEl('div', 'bg-blue-50 rounded-lg p-4 mb-2', [
-                        createEl('p', '', [createEl('strong', '', '命令: '), createEl('span', 'font-mono text-sm bg-gray-200 px-2 py-1 rounded', ex.command || '-')]),
-                        createEl('p', '', [createEl('strong', '', '模型: '), createEl('span', '', ex.executor_model || '')]),
-                        createEl('p', '', [createEl('strong', '', '开始: '), createEl('span', '', ex.started_at ? new Date(ex.started_at).toLocaleString() : '-')]),
-                        createEl('p', '', [createEl('strong', '', '完成: '), createEl('span', '', ex.completed_at ? new Date(ex.completed_at).toLocaleString() : '-')])
-                    ]);
-                    if (ex.output) {
-                        execCard.appendChild(createEl('p', '', [createEl('strong', '', '输出:')]));
-                        execCard.appendChild(createEl('pre', 'bg-gray-100 p-2 rounded mt-1 overflow-auto max-h-40', ex.output || ''));
-                    }
-                    if (ex.error) {
-                        const errorP = createEl('p', 'text-red-600 bg-red-50 p-2 rounded mt-1');
-                        errorP.textContent = `错误: ${ex.error}`;
-                        execCard.appendChild(errorP);
-                    }
-                    execSection.appendChild(execCard);
-                });
-            }
-            content.appendChild(execSection);
-
-            const evalSection = createEl('div', 'mt-6', [createEl('h3', 'font-semibold text-lg mb-2', '评估历史')]);
-            if (!evaluations || evaluations.length === 0) {
-                evalSection.appendChild(createEl('p', 'text-gray-500', '暂无评估记录'));
-            } else {
-                evaluations.forEach(ev => {
-                    const evalCard = createEl('div', 'bg-green-50 rounded-lg p-4 mb-2', [
-                        createEl('p', '', [createEl('strong', '', '评估模型: '), createEl('span', '', ev.evaluator_model || '')]),
-                        createEl('p', '', [createEl('strong', '', '评分: '), createEl('span', 'text-green-600 font-bold', `${ev.score}/10`)]),
-                        createEl('p', '', [createEl('strong', '', '时间: '), createEl('span', '', ev.created_at ? new Date(ev.created_at).toLocaleString() : '-')])
-                    ]);
-                    if (ev.comments) {
-                        evalCard.appendChild(createEl('pre', 'bg-white p-2 rounded mt-1 overflow-auto max-h-40', ev.comments));
-                    }
-                    evalSection.appendChild(evalCard);
-                });
-            }
-            content.appendChild(evalSection);
-
-            if (task.feedback_md) {
-                const feedbackSection = createEl('div', 'mt-6', [
-                    createEl('h3', 'font-semibold text-lg mb-2', '反馈'),
-                    createEl('pre', 'bg-orange-50 p-4 rounded-lg overflow-auto max-h-60', task.feedback_md)
-                ]);
-                content.appendChild(feedbackSection);
-            }
 
             document.getElementById('modal-title').textContent = task.title || '任务详情';
             currentTaskId = taskId;

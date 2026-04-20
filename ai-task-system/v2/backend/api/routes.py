@@ -41,8 +41,13 @@ async def list_tasks(status: Optional[str] = None, page: int = 1, page_size: int
     tasks = await db.list_tasks(status=status if status else None, page=page, page_size=page_size)
     total = await db.count_tasks(status=status if status else None)
     total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-    return {
-        "tasks": [task.to_dict() if hasattr(task, 'to_dict') else {
+
+    # 获取评分
+    task_ids = [t.id for t in tasks]
+    scores = await db.get_latest_scores(task_ids)
+
+    def task_to_dict(task):
+        d = {
             "id": task.id,
             "title": task.title,
             "description": task.description,
@@ -55,8 +60,18 @@ async def list_tasks(status: Optional[str] = None, page: int = 1, page_size: int
             "created_at": task.created_at,
             "last_heartbeat": task.last_heartbeat,
             "retry_count": task.retry_count,
-            "failed_at": task.failed_at
-        } for task in tasks],
+            "failed_at": task.failed_at,
+            "score": scores.get(task.id),
+            "session_id": task.session_id if hasattr(task, 'session_id') else None,
+            "pending_input": task.pending_input if hasattr(task, 'pending_input') else None,
+            "user_input_required": task.user_input_required if hasattr(task, 'user_input_required') else False
+        }
+        if hasattr(task, 'to_dict'):
+            d.update(task.to_dict())
+        return d
+
+    return {
+        "tasks": [task_to_dict(t) for t in tasks],
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -178,3 +193,54 @@ async def set_config_key(key: str, body: dict):
     if value is None:
         raise HTTPException(status_code=400, detail="Value required")
     return await db.set_config(key, value)
+
+class ContinueRequest(BaseModel):
+    user_input: str
+
+@router.post("/tasks/{task_id}/continue")
+async def continue_task(task_id: str, body: ContinueRequest):
+    """继续等待用户输入的任务"""
+    await db.init()
+    task = await db.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status != "waiting_input":
+        raise HTTPException(status_code=400, detail=f"Task is not waiting for input, current status: {task.status}")
+
+    if not task.session_id:
+        raise HTTPException(status_code=400, detail="No session_id found for this task")
+
+    # 使用 claude -c 继续会话
+    from backend.executor import Executor
+    executor = Executor()
+    output, error, cmd, exit_code = await executor.continue_execute(
+        task.session_id, body.user_input, model=task.executor_model
+    )
+
+    logger.info(f"[{task_id}] 继续执行 | exit_code: {exit_code} | 输出长度: {len(output) if output else 0}")
+
+    # 更新 execution
+    executions = await db.get_executions(task_id)
+    if executions:
+        await db.update_execution(executions[0].id, output, error, command=cmd, exit_code=exit_code)
+
+    # 检测是否还需要用户输入
+    if executor.needs_user_input(output):
+        # 仍然需要确认，更新 pending_input 后继续等待
+        await db.update_task_field(task.id, "pending_input", output)
+        await db.update_task_status(task.id, "waiting_input")
+        return {"status": "waiting_input", "output": output, "needs_more_input": True}
+
+    # 清空 pending_input
+    await db.update_task_field(task.id, "pending_input", None)
+
+    # 判断状态
+    if exit_code is None or exit_code == -1:  # 超时或异常
+        await db.update_task_status(task.id, "completed", result=output)
+        return {"status": "completed", "output": output}
+    elif exit_code != 0:  # CLI 执行失败
+        await db.update_task_status(task.id, "failed", result=output)
+        return {"status": "failed", "output": output}
+    else:  # 成功
+        await db.update_task_status(task.id, "completed", result=output)
+        return {"status": "completed", "output": output}

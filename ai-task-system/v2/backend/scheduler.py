@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from datetime import datetime
 from typing import Optional
 from backend.database import Database
@@ -25,19 +26,22 @@ class Scheduler:
         self.cli = cli or scheduler_config.get('cli', 'claude')
         self.heartbeat_interval = scheduler_config.get('heartbeat_interval', 30)
         self.stale_threshold = scheduler_config.get('stale_threshold', 120)
+        self.concurrency = scheduler_config.get('concurrency', 2)  # 并发数
         executor_config = config.get('executor', {})
         self.max_auto_retries = executor_config.get('max_auto_retries', 3)
         self.auto_retry_delay = executor_config.get('auto_retry_delay', 180)
         self._running = False
         self._task = None
         self._heartbeat_task = None
+        self._semaphore = None
         self.db = Database()
         self.executor = Executor(cli=self.cli)
         self.evaluator = Evaluator()
 
     async def start(self):
-        logger.info(f"调度器启动 | CLI: {self.cli} | 轮询间隔: {self.poll_interval}s")
+        logger.info(f"调度器启动 | CLI: {self.cli} | 轮询间隔: {self.poll_interval}s | 并发度: {self.concurrency}")
         self._running = True
+        self._semaphore = asyncio.Semaphore(self.concurrency)
         self._task = asyncio.create_task(self._poll_loop())
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
         return {"status": "started"}
@@ -79,29 +83,50 @@ class Scheduler:
         tasks = await self.db.list_tasks(status="pending")
         if tasks:
             logger.info(f"发现 {len(tasks)} 个待执行任务")
-        for task in tasks:
-            if task.status == "running":
-                continue
-            await self._execute_task(task)
+        # 并发执行任务（受 semaphore 控制）
+        async def execute_with_semaphore(task):
+            async with self._semaphore:
+                await self._execute_task(task)
+
+        await asyncio.gather(*[execute_with_semaphore(task) for task in tasks if task.status == "pending"])
 
     async def _execute_task(self, task):
         # 统一日志格式：[ID] 标题: xxx | 信息
         task_info = f"[{task.id}] {task.title}"
 
-        logger.info(f"{task_info} | 开始执行")
-        logger.info(f"{task_info} | 模型: {task.executor_model or '默认(使用CLI)'}")
         await self.db.update_task_status(task.id, "running")
         logger.info(f"{task_info} | 状态: pending -> running")
+
+        # 生成或使用 session_id
+        session_id = task.session_id or str(uuid.uuid4())
+
+        # 构建完整的执行信息
+        model_info = f"模型: {task.executor_model}" if task.executor_model else "模型: CLI默认"
+        tools_info = f"工具: {self.executor.allowed_tools}" if self.executor.allowed_tools else "工具: 无限制"
+        logger.info(f"{task_info} | 开始执行 | {model_info} | {tools_info}")
+        logger.info(f"{task_info} | session_id: {session_id}")
+        logger.info(f"{task_info} | 任务描述: {task.description[:100]}{'...' if len(task.description) > 100 else ''}")
 
         execution = await self.db.create_execution(task.id, task.executor_model)
         logger.info(f"{task_info} | 执行命令...")
         output, error, cmd, exit_code = await self.executor.execute(
-            task.id, task.description, task.feedback_md, model=task.executor_model
+            task.id, task.description, task.feedback_md,
+            model=task.executor_model, session_id=session_id,
+            allowed_tools=self.executor.allowed_tools
         )
         logger.info(f"{task_info} | 命令: {cmd}")
 
         # 执行完成后更新 execution（带 exit_code）
         await self.db.update_execution(execution.id, output, error, command=cmd, exit_code=exit_code)
+
+        # 检测是否需要用户输入
+        if self.executor.needs_user_input(output):
+            # 暂停任务，等待用户确认
+            await self.db.update_task_status(task.id, "waiting_input")
+            await self.db.update_task_field(task.id, "session_id", session_id)
+            await self.db.update_task_field(task.id, "pending_input", output)
+            logger.info(f"{task_info} | 需要用户确认 | 输出长度: {len(output) if output else 0} 字符")
+            return
 
         # 判断状态
         if exit_code is None or exit_code == -1:  # 超时或异常
@@ -133,37 +158,25 @@ class Scheduler:
             task.description, output, iteration_count=task.iteration_count
         )
 
-        # TODO: 调用评估模型 API
-        evaluation_result = f"""### 评分: 7/10
-### 优点
-- 任务已完成基本要求
-
-### 问题
-- 可以进一步优化
-
-### 改进建议
-1. 建议添加错误处理
-"""
+        # 调用评估器进行真实评估
+        score, evaluation_result = await self.evaluator.evaluate(
+            task.description, output, iteration_count=task.iteration_count
+        )
 
         parsed = self.evaluator.parse_evaluation(evaluation_result)
         await self.db.create_evaluation(
             task.id, execution.id, task.evaluator_model,
-            parsed["score"], parsed["comments"]
+            score, evaluation_result
         )
-        logger.info(f"{task_info} | 评估完成 | 评分: {parsed['score']}/10")
+        logger.info(f"{task_info} | 评估完成 | 评分: {score}/10")
 
         feedback_md = self.evaluator.build_feedback_md(
             task.description, output, evaluation_result, task.iteration_count
         )
 
-        if parsed["score"] < task.improvement_threshold:
-            if task.iteration_count < task.max_iterations:
-                await self.db.increment_iteration(task.id)
-                await self.db.update_task_status(task.id, "re-execute", feedback_md=feedback_md)
-                logger.warning(f"{task_info} | 评分低于阈值({task.improvement_threshold})，标记待重试 | 迭代: {task.iteration_count + 1}/{task.max_iterations}")
-            else:
-                await self.db.update_task_status(task.id, "completed", feedback_md=feedback_md)
-                logger.warning(f"{task_info} | 评分低于阈值，已达最大迭代次数，标记完成")
+        if score < task.improvement_threshold:
+            await self.db.update_task_status(task.id, "completed", feedback_md=feedback_md)
+            logger.warning(f"{task_info} | 评分低于阈值({task.improvement_threshold})，请手动优化后重试")
         else:
             await self.db.update_task_status(task.id, "completed", feedback_md=feedback_md)
             logger.info(f"{task_info} | 评估通过 | 最终状态: completed")

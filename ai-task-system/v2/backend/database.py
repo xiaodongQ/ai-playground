@@ -1,7 +1,7 @@
 import aiosqlite
 import uuid
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import BaseModel
 
 class Task(BaseModel):
@@ -23,6 +23,9 @@ class Task(BaseModel):
     last_heartbeat: Optional[str] = None
     retry_count: int = 0
     failed_at: Optional[datetime] = None
+    session_id: Optional[str] = None  # 用于 claude -c 继续会话
+    user_input_required: bool = False  # 是否需要用户输入
+    pending_input: Optional[str] = None  # 待处理的AI输出（需用户确认）
 
 class Execution(BaseModel):
     id: str
@@ -56,6 +59,24 @@ class Database:
             except Exception:
                 pass  # 列已存在
 
+            # 迁移：添加 session_id 列（如果不存在）
+            try:
+                await db.execute("ALTER TABLE tasks ADD COLUMN session_id TEXT")
+            except Exception:
+                pass  # 列已存在
+
+            # 迁移：添加 user_input_required 列（如果不存在）
+            try:
+                await db.execute("ALTER TABLE tasks ADD COLUMN user_input_required INTEGER DEFAULT 0")
+            except Exception:
+                pass  # 列已存在
+
+            # 迁移：添加 pending_input 列（如果不存在）
+            try:
+                await db.execute("ALTER TABLE tasks ADD COLUMN pending_input TEXT")
+            except Exception:
+                pass  # 列已存在
+
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     id TEXT PRIMARY KEY,
@@ -75,7 +96,10 @@ class Database:
                     feedback_md TEXT,
                     last_heartbeat TEXT,
                     retry_count INTEGER DEFAULT 0,
-                    failed_at TEXT
+                    failed_at TEXT,
+                    session_id TEXT,
+                    user_input_required INTEGER DEFAULT 0,
+                    pending_input TEXT
                 )
             """)
             await db.execute("""
@@ -129,7 +153,10 @@ class Database:
             improvement_threshold=row[12], result=row[13], feedback_md=row[14],
             last_heartbeat=row[15] if len(row) > 15 else None,
             retry_count=row[16] if len(row) > 16 else 0,
-            failed_at=row[17] if len(row) > 17 else None
+            failed_at=row[17] if len(row) > 17 else None,
+            session_id=row[18] if len(row) > 18 else None,
+            user_input_required=bool(row[19]) if len(row) > 19 else False,
+            pending_input=row[20] if len(row) > 20 else None
         )
 
     async def create_task(self, title: str, description: str,
@@ -369,6 +396,26 @@ class Database:
                     id=r[0], task_id=r[1], execution_id=r[2],
                     evaluator_model=r[3], score=r[4], comments=r[5], created_at=r[6])
                     for r in rows]
+
+    async def get_latest_scores(self, task_ids: List[str]) -> Dict[str, int]:
+        """获取多个任务的最新评分"""
+        if not task_ids:
+            return {}
+        await self.init()
+        async with aiosqlite.connect(self.db_path) as db:
+            placeholders = ','.join('?' * len(task_ids))
+            # 每个任务取最新评分
+            async with db.execute(f"""
+                SELECT e.task_id, e.score FROM evaluations e
+                INNER JOIN (
+                    SELECT task_id, MAX(created_at) as max_created
+                    FROM evaluations
+                    WHERE task_id IN ({placeholders})
+                    GROUP BY task_id
+                ) latest ON e.task_id = latest.task_id AND e.created_at = latest.max_created
+            """, task_ids) as cursor:
+                rows = await cursor.fetchall()
+                return {row[0]: row[1] for row in rows}
 
     async def close(self):
         pass
