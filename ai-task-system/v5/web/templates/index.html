@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Task System</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- 导航栏 -->
+  <nav class="navbar">
+    <a href="/" class="navbar-brand">
+      <span class="icon">🤖</span>
+      <span>AI Task System</span>
+    </a>
+    <div class="navbar-links">
+      <a href="/" class="active">任务列表</a>
+      <a href="/new">新建任务</a>
+    </div>
+  </nav>
+
+  <!-- 主容器 -->
+  <div class="container">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <h1 class="page-title">任务列表</h1>
+      <a href="/new" class="btn btn-primary">+ 新建任务</a>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="stats-grid" id="stats-container">
+      <div class="stat-card">
+        <div class="label">加载中...</div>
+      </div>
+    </div>
+
+    <!-- 任务列表 -->
+    <div class="task-list" id="task-list">
+      <div class="empty-state">
+        <div class="spinner"></div>
+        <p>加载中...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+  <script>
+    // 页面初始化
+    document.addEventListener('DOMContentLoaded', async () => {
+      const taskList = document.getElementById('task-list');
+      const statsContainer = document.getElementById('stats-container');
+
+      // 加载数据
+      async function loadData() {
+        try {
+          // 获取任务列表
+          const tasks = await api.getTasks();
+          
+          // 按创建时间倒序排列
+          tasks.sort((a, b) => {
+            const timeA = a.created_at || a.createdAt || 0;
+            const timeB = b.created_at || b.createdAt || 0;
+            return timeB - timeA;
+          });
+
+          // 只显示前 50 个
+          renderTaskList(tasks.slice(0, 50), 'task-list');
+
+          // 统计状态
+          const statusCounts = { pending: 0, running: 0, done: 0, failed: 0 };
+          tasks.forEach(t => {
+            const s = (t.status || 'pending').toLowerCase();
+            if (statusCounts.hasOwnProperty(s)) {
+              statusCounts[s]++;
+            }
+          });
+
+          renderStats([
+            { status: 'pending', count: statusCounts.pending },
+            { status: 'running', count: statusCounts.running },
+            { status: 'done', count: statusCounts.done },
+            { status: 'failed', count: statusCounts.failed }
+          ], 'stats-container');
+
+        } catch (err) {
+          console.error('Failed to load data:', err);
+          taskList.innerHTML = `
+            <div class="empty-state">
+              <div class="icon">⚠️</div>
+              <h3>加载失败</h3>
+              <p>${escapeHtml(err.message)}</p>
+            </div>
+          `;
+        }
+      }
+
+      // 初始化
+      await loadData();
+
+      // 初始化 WebSocket 监听任务更新
+      const ws = await initWebSocket();
+      if (ws) {
+        ws.on('task_status', (msg) => {
+          // 任务状态变化时刷新列表
+          loadData();
+        });
+        
+        ws.on('task_complete', (msg) => {
+          // 任务完成时刷新列表
+          loadData();
+        });
+      }
+
+      // 每 10 秒刷新一次
+      setInterval(loadData, 10000);
+    });
+  </script>
+</body>
+</html>

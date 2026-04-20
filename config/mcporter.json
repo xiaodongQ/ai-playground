@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "exa": {
+      "baseUrl": "https://mcp.exa.ai/mcp",
+      "keepAlive": true
+    }
+  },
+  "imports": []
+}

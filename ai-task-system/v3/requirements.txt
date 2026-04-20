@@ -1,0 +1,8 @@
+# AI Task System V3 - Requirements
+# CodeBuddy 个人内网专属版
+
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+python-multipart>=0.0.6
+websockets>=10.4

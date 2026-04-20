@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "local-rag-search": {
+      "version": "0.1.0",
+      "installedAt": 1772901334693
+    },
+    "multi-search-engine": {
+      "version": "2.0.1",
+      "installedAt": 1772901341192
+    },
+    "first-principles-decomposer": {
+      "version": "1.0.0",
+      "installedAt": 1772902135765
+    },
+    "tavily-search": {
+      "version": "1.0.0",
+      "installedAt": 1772925316661
+    },
+    "exa-web-search-free": {
+      "version": "1.0.1",
+      "installedAt": 1772928272353
+    },
+    "mcporter-1-0-0": {
+      "version": "1.0.0",
+      "installedAt": 1772928300369
+    }
+  }
+}

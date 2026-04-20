@@ -1,0 +1,20 @@
+executor:
+  engine: cli  # cli | sdk
+  cli_path: claw
+  sdk_path: claw
+  timeout: 300  # default timeout in seconds
+
+sdk:
+  permission_mode: bypassPermissions  # SDK permission mode
+  model: claude-opus-4-6  # default model
+
+evaluator:
+  default_model: gpt-4o
+  timeout: 60
+
+database:
+  path: data/tasks.db
+
+server:
+  host: 0.0.0.0
+  port: 8000
