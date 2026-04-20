@@ -5,6 +5,7 @@ from typing import Optional
 from backend.database import Database
 from backend.executor import Executor
 from backend.evaluator import Evaluator
+from backend.retry import RetryExecutor, RetryConfig
 from backend.config import get_logger, load_config
 
 logger = get_logger(__name__)
@@ -35,7 +36,15 @@ class Scheduler:
         self._heartbeat_task = None
         self._semaphore = None
         self.db = Database()
-        self.executor = Executor(cli=self.cli)
+        # 用 RetryExecutor 包装，实现指数退避
+        self.executor = RetryExecutor(
+            Executor(cli=self.cli),
+            config=RetryConfig(
+                max_retries=self.max_auto_retries,
+                base_delay=2.0,
+                max_delay=30.0
+            )
+        )
         self.evaluator = Evaluator()
 
     async def start(self):
@@ -139,19 +148,14 @@ class Scheduler:
             logger.info(f"{task_info} | 执行完成 | 输出长度: {len(output) if output else 0} 字符")
             if error:
                 logger.warning(f"{task_info} | 错误: {error[:200]}")
-        elif exit_code != 0:  # CLI 执行失败
+            await self._evaluate_task(task, execution, output)
+        elif exit_code != 0:  # CLI 执行失败（RetryExecutor 已处理重试，仍失败）
             await self.db.update_task_status(task.id, "failed", result=output)
             await self.db.increment_retry_count(task.id)
-            logger.warning(f"{task_info} | 执行失败 | exit_code: {exit_code} | 错误: {error[:200] if error else '无'}")
+            logger.warning(f"{task_info} | 执行失败（已重试）| exit_code: {exit_code} | 错误: {error[:200] if error else '无'}")
         else:  # 成功
             await self.db.update_task_status(task.id, "completed", result=output)
             logger.info(f"{task_info} | 执行完成 | 输出长度: {len(output) if output else 0} 字符")
-
-        # 评估（仅成功或超时的任务，失败的不评估）
-        if exit_code != 0 and exit_code != -1:
-            # 失败任务不评估，等待重试
-            await self._handle_failed_task(task)
-        else:
             await self._evaluate_task(task, execution, output)
 
     async def _evaluate_task(self, task, execution, output):

@@ -14,7 +14,7 @@ executor:
 
 evaluator:
   api_base: ""             # API 地址，留空使用 CLI 模式
-  model: "claude-opus-4-6" # 评估模型
+  model: ""                # 评估模型
   use_cli: true            # true: 使用 claude --print 做评估; false: 使用 API
 
 log:

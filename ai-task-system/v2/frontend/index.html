@@ -126,8 +126,8 @@
         </div>
 
         <div id="task-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50">
-            <div class="modal-content bg-white rounded-lg max-w-5xl mx-auto mt-20 max-h-[85vh] flex flex-col">
-                <div class="sticky top-0 bg-white p-6 pb-4 border-b flex justify-between items-center z-10">
+            <div class="modal-content bg-white rounded-lg max-w-5xl mx-auto mt-10 max-h-[90vh] flex flex-col">
+                <div class="sticky top-0 bg-white p-4 pb-3 border-b flex justify-between items-center z-10">
                     <h2 class="text-2xl font-semibold" id="modal-title">任务详情</h2>
                     <div class="flex gap-2">
                         <button id="btn-refresh-detail" onclick="refreshTaskDetail()" class="text-gray-500 hover:text-gray-700 p-1" title="刷新">
@@ -142,7 +142,7 @@
                         </button>
                     </div>
                 </div>
-                <div id="modal-content" class="p-6 overflow-y-auto flex-1"></div>
+                <div id="modal-content" class="p-4 overflow-y-auto flex-1"></div>
             </div>
         </div>
 
@@ -546,6 +546,29 @@
         }
     }
 
+    async function continueTaskInDetail(taskId, userInput) {
+        try {
+            const res = await fetch(`${API_BASE}/tasks/${taskId}/continue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_input: userInput })
+            });
+            if (res.ok) {
+                // 刷新详情弹窗
+                showTaskDetail(taskId);
+                // 同时刷新任务列表
+                loadTasks();
+                loadStats();
+            } else {
+                const err = await res.json();
+                alert('发送失败: ' + (err.detail || '未知错误'));
+            }
+        } catch (e) {
+            console.error('Failed to continue task:', e);
+            alert('发送失败');
+        }
+    }
+
     function formatTime(ts) {
         if (!ts) return '-';
         return new Date(ts).toISOString().slice(0,19).replace('T',' ');
@@ -610,7 +633,7 @@
             }
 
             // === 执行历史 + 评估历史 并排两栏 ===
-            const columnsDiv = createEl('div', 'grid grid-cols-2 gap-6');
+            const columnsDiv = createEl('div', 'grid grid-cols-2 gap-4');
 
             // 左栏：执行历史
             const execCol = createEl('div', '');
@@ -619,37 +642,70 @@
             if (!executions || executions.length === 0) {
                 execCol.appendChild(createEl('p', 'text-xs text-gray-400', '暂无执行记录'));
             } else {
-                const latestExec = executions[0]; // 只显示最新一次
-                const execCard = createEl('div', 'border rounded-lg p-3 text-xs', '');
+                const hasArchive = executions.length > 1;
+                const archiveExecs = hasArchive ? executions.slice(1) : [];
+                const currentExec = executions[0];
 
-                // 命令（可复制）
+                // 当前执行
+                const currentLabel = createEl('div', 'flex items-center gap-2 mb-2');
+                currentLabel.innerHTML = `<span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">当前</span>`;
+                execCol.appendChild(currentLabel);
+
+                const execCard = createEl('div', 'border rounded-lg p-3 text-xs mb-3');
                 const cmdDiv = createEl('div', 'mb-2');
-                cmdDiv.innerHTML = `<span class="text-gray-400">命令:</span><br><code class="block bg-slate-100 p-2 rounded mt-1 break-all text-xs">${escapeHtml(latestExec.command || '-')}</code>`;
+                cmdDiv.innerHTML = `<span class="text-gray-400">命令:</span><br><code class="block bg-slate-100 p-2 rounded mt-1 break-all text-xs">${escapeHtml(currentExec.command || '-')}</code>`;
                 execCard.appendChild(cmdDiv);
 
-                // 时间
                 const timeDiv = createEl('div', 'text-gray-500 mb-2');
-                timeDiv.innerHTML = `开始: ${formatTime(latestExec.started_at)}<br>完成: ${formatTime(latestExec.completed_at)}`;
+                timeDiv.innerHTML = `开始: ${formatTime(currentExec.started_at)}<br>完成: ${formatTime(currentExec.completed_at)}`;
                 execCard.appendChild(timeDiv);
 
-                // 输出
-                if (latestExec.output) {
+                if (currentExec.output) {
                     const outDiv = createEl('div', 'mb-2');
                     outDiv.innerHTML = `<span class="text-gray-400">输出:</span>`;
                     const outPre = createEl('pre', 'bg-slate-50 p-3 rounded mt-1 text-xs max-h-48 overflow-auto whitespace-pre-wrap break-words');
-                    outPre.textContent = latestExec.output || '';
+                    outPre.textContent = currentExec.output || '';
                     outDiv.appendChild(outPre);
                     execCard.appendChild(outDiv);
                 }
 
-                // 错误
-                if (latestExec.error) {
+                if (currentExec.error) {
                     const errDiv = createEl('div', 'text-red-600 text-xs');
-                    errDiv.textContent = `错误: ${latestExec.error}`;
+                    errDiv.textContent = `错误: ${currentExec.error}`;
                     execCard.appendChild(errDiv);
                 }
-
                 execCol.appendChild(execCard);
+
+                // 归档记录（折叠）
+                if (hasArchive) {
+                    const archiveId = `archive-exec-${taskId}`;
+                    const archiveHeader = createEl('div', 'flex items-center gap-2 mb-2 cursor-pointer text-gray-500');
+                    archiveHeader.innerHTML = `<span class="text-xs">📁 归档记录 (${archiveExecs.length})</span><span class="text-xs">▼</span>`;
+                    const archiveContent = createEl('div', 'hidden', '');
+                    archiveContent.id = archiveId;
+
+                    archiveHeader.onclick = () => {
+                        archiveContent.classList.toggle('hidden');
+                    };
+
+                    archiveExecs.forEach((exec, idx) => {
+                        const archiveCard = createEl('div', 'border border-dashed border-gray-300 rounded-lg p-3 text-xs mb-2 opacity-75');
+                        archiveCard.innerHTML = `
+                            <div class="text-xs text-gray-500 mb-2">#${archiveExecs.length - idx} · ${formatTime(exec.started_at)}</div>
+                            <code class="block bg-slate-50 p-2 rounded text-xs break-all mb-2">${escapeHtml(exec.command || '-')}</code>
+                            <div class="text-gray-400 mb-1">开始: ${formatTime(exec.started_at)} · 完成: ${formatTime(exec.completed_at)}</div>
+                        `;
+                        if (exec.output) {
+                            const outPre = createEl('pre', 'bg-slate-50 p-2 rounded text-xs max-h-24 overflow-auto whitespace-pre-wrap break-words');
+                            outPre.textContent = exec.output;
+                            archiveCard.appendChild(outPre);
+                        }
+                        archiveContent.appendChild(archiveCard);
+                    });
+
+                    execCol.appendChild(archiveHeader);
+                    execCol.appendChild(archiveContent);
+                }
             }
 
             // 右栏：评估历史
@@ -659,27 +715,64 @@
             if (!evaluations || evaluations.length === 0) {
                 evalCol.appendChild(createEl('p', 'text-xs text-gray-400', '暂无评估记录'));
             } else {
+                const hasArchive = evaluations.length > 1;
+                const archiveEvals = hasArchive ? evaluations.slice(1) : [];
                 const latestEval = evaluations[0];
-                const evalCard = createEl('div', 'border-l-4 border-green-400 pl-3 text-xs', '');
 
-                // 评分星级
+                // 当前评估
+                const currentLabel = createEl('div', 'flex items-center gap-2 mb-2');
+                currentLabel.innerHTML = `<span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">当前</span>`;
+                evalCol.appendChild(currentLabel);
+
+                const evalCard = createEl('div', 'border-l-4 border-green-400 pl-3 text-xs mb-3');
+
                 const scoreDiv = createEl('div', 'flex items-center gap-2 mb-2');
                 scoreDiv.innerHTML = `<span class="text-2xl text-green-500 font-bold">${latestEval.score}</span><span class="text-gray-400">/10</span><span class="text-green-400">${renderStars(latestEval.score)}</span>`;
                 evalCard.appendChild(scoreDiv);
 
-                // 评估模型和时间
                 const evalMeta = createEl('div', 'text-gray-500 mb-2 text-xs');
                 evalMeta.innerHTML = `${latestEval.evaluator_model || ''} · ${formatTime(latestEval.created_at)}`;
                 evalCard.appendChild(evalMeta);
 
-                // 评估内容
                 if (latestEval.comments) {
                     const evalContent = createEl('pre', 'text-gray-700 whitespace-pre-wrap break-words text-xs max-h-56 overflow-auto');
                     evalContent.textContent = latestEval.comments;
                     evalCard.appendChild(evalContent);
                 }
-
                 evalCol.appendChild(evalCard);
+
+                // 归档评估
+                if (hasArchive) {
+                    const archiveId = `archive-eval-${taskId}`;
+                    const archiveHeader = createEl('div', 'flex items-center gap-2 mb-2 cursor-pointer text-gray-500');
+                    archiveHeader.innerHTML = `<span class="text-xs">📁 归档记录 (${archiveEvals.length})</span><span class="text-xs">▼</span>`;
+                    const archiveContent = createEl('div', 'hidden', '');
+                    archiveContent.id = archiveId;
+
+                    archiveHeader.onclick = () => {
+                        archiveContent.classList.toggle('hidden');
+                    };
+
+                    archiveEvals.forEach((ev, idx) => {
+                        const archiveCard = createEl('div', 'border border-dashed border-gray-300 rounded-lg p-3 text-xs mb-2 opacity-75');
+                        archiveCard.innerHTML = `
+                            <div class="flex items-center gap-2 mb-2">
+                                <span class="text-lg text-green-500 font-bold">${ev.score}</span>
+                                <span class="text-gray-400">/10</span>
+                                <span class="text-gray-400 text-xs ml-auto">${formatTime(ev.created_at)}</span>
+                            </div>
+                        `;
+                        if (ev.comments) {
+                            const evalContent = createEl('pre', 'text-gray-600 whitespace-pre-wrap break-words text-xs max-h-24 overflow-auto');
+                            evalContent.textContent = ev.comments;
+                            archiveCard.appendChild(evalContent);
+                        }
+                        archiveContent.appendChild(archiveCard);
+                    });
+
+                    evalCol.appendChild(archiveHeader);
+                    evalCol.appendChild(archiveContent);
+                }
             }
 
             columnsDiv.appendChild(execCol);
@@ -709,6 +802,31 @@
                 retryBtn.onclick = () => retryTask(task.id);
                 retryBtn.textContent = '重试任务';
                 actionDiv.appendChild(retryBtn);
+            } else if (task.status === 'waiting_input') {
+                // 用户输入区域
+                const inputArea = createEl('div', 'flex-1 flex gap-2 items-center');
+                const input = createEl('input', 'flex-1 border rounded px-3 py-2 text-sm');
+                input.type = 'text';
+                input.placeholder = '输入回复让 AI 继续...';
+                input.id = 'input-continue';
+
+                const sendBtn = createEl('button', 'px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 text-sm');
+                sendBtn.textContent = '发送';
+                sendBtn.onclick = () => {
+                    const userInput = input.value.trim();
+                    if (!userInput) {
+                        alert('请输入回复内容');
+                        return;
+                    }
+                    continueTaskInDetail(task.id, userInput);
+                };
+                input.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') sendBtn.click();
+                });
+
+                inputArea.appendChild(input);
+                inputArea.appendChild(sendBtn);
+                actionDiv.appendChild(inputArea);
             }
             content.appendChild(actionDiv);
 
