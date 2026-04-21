@@ -23,6 +23,19 @@ class RetryExecutor:
         self.executor = executor
         self.config = config or RetryConfig()
 
+    @property
+    def allowed_tools(self):
+        """代理到内部执行器"""
+        return getattr(self.executor, 'allowed_tools', None)
+
+    def build_command(self, *args, **kwargs):
+        """代理到内部执行器"""
+        return self.executor.build_command(*args, **kwargs)
+
+    def _cmd_to_str(self, cmd):
+        """代理到内部执行器"""
+        return self.executor._cmd_to_str(cmd)
+
     def needs_user_input(self, output: str) -> bool:
         """代理到内部执行器"""
         return self.executor.needs_user_input(output)

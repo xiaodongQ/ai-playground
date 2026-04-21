@@ -122,7 +122,8 @@ class Scheduler:
             model=task.executor_model, session_id=session_id,
             allowed_tools=self.executor.allowed_tools
         )
-        execution = await self.db.create_execution(task.id, task.executor_model, command=cmd)
+        cmd_str = self.executor._cmd_to_str(cmd)
+        execution = await self.db.create_execution(task.id, task.executor_model, command=cmd_str)
         logger.info(f"{task_info} | 执行命令: {cmd}")
         output, error, _, exit_code = await self.executor.execute(
             task.id, task.description, task.feedback_md,
@@ -131,7 +132,7 @@ class Scheduler:
         )
 
         # 执行完成后更新 execution（带 exit_code）
-        await self.db.update_execution(execution.id, output, error, command=cmd, exit_code=exit_code)
+        await self.db.update_execution(execution.id, output, error, command=cmd_str, exit_code=exit_code)
 
         # 检测是否需要用户输入
         if self.executor.needs_user_input(output):
