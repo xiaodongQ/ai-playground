@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skill Factory</title>
+<style>
+:root {
+  --bg: #f8fafc;
+  --card-bg: #ffffff;
+  --sidebar-bg: #ffffff;
+  --sidebar-border: #e2e8f0;
+  --text-primary: #1e293b;
+  --text-secondary: #94a3b8;
+  --border: #e2e8f0;
+  --hover: #f1f5f9;
+  --primary: #2563eb;
+  --success: #16a34a;
+  --warning: #ca8a04;
+  --danger: #dc2626;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  display: flex;
+  min-height: 100vh;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 160px;
+  flex-shrink: 0;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--sidebar-border);
+  display: flex;
+  flex-direction: column;
+  padding: 24px 0;
+}
+.logo { padding: 0 20px 24px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.logo-main { font-size: 18px; font-weight: 600; color: var(--text-primary); }
+.logo-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.nav { flex: 1; }
+.nav-item {
+  padding: 10px 20px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: all 0.2s;
+}
+.nav-item:hover { color: var(--text-primary); background: var(--hover); }
+.nav-item.active { color: var(--primary); border-left-color: var(--primary); font-weight: 500; }
+.sidebar-footer { padding: 0 20px; border-top: 1px solid var(--border); margin-top: auto; }
+.sidebar-footer .nav-item { font-size: 12px; }
+
+/* Main */
+.main { flex: 1; padding: 28px; overflow-y: auto; }
+.page-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+.hidden { display: none !important; }
+
+/* Stat Cards */
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+.stat-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 20px;
+}
+.stat-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.stat-value { font-size: 32px; font-weight: 600; }
+.stat-pending .stat-value { color: var(--warning); }
+.stat-in_progress .stat-value { color: var(--primary); }
+.stat-archived .stat-value { color: var(--success); }
+.stat-exception .stat-value { color: var(--danger); }
+
+/* Bar Chart */
+.chart-section { background: var(--card-bg); border: 1px solid var(--border); border-radius: 4px; padding: 20px; margin-bottom: 24px; }
+.chart-title { font-size: 14px; font-weight: 500; margin-bottom: 16px; }
+.chart-bars { display: flex; align-items: flex-end; gap: 8px; height: 80px; }
+.bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.bar {
+  width: 100%;
+  max-width: 32px;
+  background: linear-gradient(to top, #fed7aa, #c2410c);
+  border-radius: 2px 2px 0 0;
+  min-height: 4px;
+}
+.bar-label { font-size: 11px; color: var(--text-secondary); }
+
+/* Recent Tasks */
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.section-title { font-size: 16px; font-weight: 500; }
+
+/* Table */
+table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 4px; overflow: hidden; }
+th { text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 500; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tr:hover td { background: var(--hover); }
+tr:last-child td { border-bottom: none; }
+.task-title-cell { max-width: 300px; }
+.task-title-cell .title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-title-cell .desc { font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+
+/* Status Pill */
+.status-pill { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 500; }
+.status-pending { background: rgba(202,138,4,0.1); color: var(--warning); }
+.status-in_progress { background: rgba(37,99,235,0.1); color: var(--primary); }
+.status-archived { background: rgba(22,163,74,0.1); color: var(--success); }
+.status-exception { background: rgba(220,38,38,0.1); color: var(--danger); }
+
+/* Toolbar */
+.toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
+.toolbar select, .toolbar input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+  background: var(--card-bg);
+}
+.toolbar select:focus, .toolbar input:focus { border-color: var(--primary); }
+.toolbar .spacer { flex: 1; }
+.toolbar .count { font-size: 12px; color: var(--text-secondary); }
+
+/* Buttons */
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  font-family: inherit;
+}
+.btn:hover { opacity: 0.85; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-secondary { background: var(--text-secondary); color: #fff; }
+.btn-small { padding: 4px 10px; font-size: 12px; }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-warning { background: var(--warning); color: #fff; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 150ms ease-out;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+.modal {
+  background: #fff;
+  border-radius: 16px;
+  padding: 28px;
+  max-width: 600px;
+  width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal h2 { font-size: 18px; margin-bottom: 20px; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.form-group input, .form-group textarea, .form-group select {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+  font-family: inherit;
+}
+.form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: var(--primary); }
+.form-group textarea { resize: vertical; min-height: 80px; }
+.form-group textarea.code { font-family: monospace; font-size: 12px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+/* Empty */
+.empty { text-align: center; padding: 48px; color: var(--text-secondary); font-size: 14px; }
+
+/* Automation placeholder */
+.placeholder-page { text-align: center; padding: 80px 40px; color: var(--text-secondary); font-size: 14px; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="logo">
+    <div class="logo-main">⚙️ Skill Factory</div>
+    <div class="logo-sub">自动化开发工厂</div>
+  </div>
+  <nav class="nav">
+    <div class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 总览</div>
+    <div class="nav-item" data-tab="tasks" onclick="switchTab('tasks')">📋 任务</div>
+    <div class="nav-item" data-tab="experiences" onclick="switchTab('experiences')">📚 经验库</div>
+    <div class="nav-item" data-tab="automation" onclick="switchTab('automation')">⚡ 自动化</div>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="nav-item">⚙️ 设置</div>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<main class="main">
+  <!-- Dashboard -->
+  <div id="page-dashboard">
+    <h1 class="page-title">总览</h1>
+    <div class="stat-grid">
+      <div class="stat-card stat-pending">
+        <div class="stat-label">待认领</div>
+        <div class="stat-value" id="stat-pending">-</div>
+      </div>
+      <div class="stat-card stat-in_progress">
+        <div class="stat-label">进行中</div>
+        <div class="stat-value" id="stat-in_progress">-</div>
+      </div>
+      <div class="stat-card stat-archived">
+        <div class="stat-label">已完成</div>
+        <div class="stat-value" id="stat-archived">-</div>
+      </div>
+      <div class="stat-card stat-exception">
+        <div class="stat-label">异常</div>
+        <div class="stat-value" id="stat-exception">-</div>
+      </div>
+    </div>
+
+    <div class="chart-section">
+      <div class="chart-title">任务趋势（近7日）</div>
+      <div class="chart-bars" id="chart-bars"></div>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">最新任务</div>
+      <button class="btn btn-primary btn-small" onclick="showTaskModal()">+ 新建任务</button>
+    </div>
+    <div id="recent-list"></div>
+  </div>
+
+  <!-- Tasks -->
+  <div id="page-tasks" class="hidden">
+    <h1 class="page-title">任务</h1>
+    <div class="toolbar">
+      <select id="filter-status">
+        <option value="">全部状态</option>
+        <option value="pending">待认领</option>
+        <option value="in_progress">进行中</option>
+        <option value="archived">已完成</option>
+        <option value="exception">异常</option>
+      </select>
+      <button class="btn btn-primary" onclick="showTaskModal()">+ 新建任务</button>
+      <div class="spacer"></div>
+      <span class="count" id="task-count"></span>
+    </div>
+    <div id="task-list"></div>
+  </div>
+
+  <!-- Experiences -->
+  <div id="page-experiences" class="hidden">
+    <h1 class="page-title">经验库</h1>
+    <div class="toolbar">
+      <input id="exp-search" type="text" placeholder="搜索模块..." style="width: 200px;">
+      <button class="btn btn-primary" onclick="showExpModal()">+ 添加经验</button>
+      <div class="spacer"></div>
+      <span class="count" id="exp-count"></span>
+    </div>
+    <div id="exp-list"></div>
+  </div>
+
+  <!-- Automation -->
+  <div id="page-automation" class="hidden">
+    <h1 class="page-title">自动化</h1>
+    <div class="placeholder-page">⚡ 自动化执行面板开发中</div>
+  </div>
+</main>
+
+<!-- Task Modal -->
+<div id="task-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2 id="task-modal-title">新建任务</h2>
+    <input type="hidden" id="task-id">
+    <div class="form-group"><label>标题 *</label><input id="task-title" placeholder="任务标题"></div>
+    <div class="form-group"><label>描述</label><textarea id="task-desc" placeholder="详细描述..."></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>关联经验ID</label><input id="task-exp-id" placeholder="可留空"></div>
+      <div class="form-group"><label>模块</label><input id="task-module" placeholder="如 redis-cluster"></div>
+    </div>
+    <div class="form-group"><label>资源链接</label><input id="task-resources" placeholder="仓库地址或文档链接"></div>
+    <div class="form-group"><label>验收标准</label><textarea id="task-acceptance" class="code" placeholder="正向用例:\n输入... → 输出...\n\n反向用例:\n输入... → 预期行为..."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeTaskModal()">取消</button>
+      <button id="task-submit-btn" class="btn btn-primary" onclick="submitTask()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- Exp Modal -->
+<div id="exp-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <h2 id="exp-modal-title">添加经验</h2>
+    <input type="hidden" id="exp-id">
+    <div class="form-group"><label>模块 *</label><input id="exp-module" placeholder="如 redis-cluster"></div>
+    <div class="form-group"><label>关键词</label><textarea id="exp-keywords" placeholder="CLUSTERDOWN, MOVED redirect, READONLY..."></textarea></div>
+    <div class="form-group"><label>日志路径</label><input id="exp-log-paths" placeholder="/var/log/redis/redis-server.log"></div>
+    <div class="form-group"><label>工具命令</label><textarea id="exp-tool-usage" placeholder="redis-cli cluster nodes\nredis-cli slowlog get 10"></textarea></div>
+    <div class="form-group"><label>适用场景</label><textarea id="exp-scene" placeholder="集群节点失联定位\n内存异常增长分析"></textarea></div>
+    <div class="form-group"><label>日志样例</label><textarea id="exp-log-samples" class="code" placeholder="# CLUSTERDOWN\nThe cluster is gone"></textarea></div>
+    <div class="form-group"><label>代码片段</label><textarea id="exp-code-snippets" class="code" placeholder="配置文件调整示例..."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeExpModal()">取消</button>
+      <button id="exp-submit-btn" class="btn btn-primary" onclick="submitExp()">添加</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+
+let currentTab = 'dashboard';
+let tasks = [];
+let exps = [];
+
+// Init
+document.getElementById('filter-status').addEventListener('change', loadTasks);
+document.getElementById('exp-search').addEventListener('input', debounce(loadExps, 300));
+loadDashboard();
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.tab === tab));
+  document.querySelectorAll('.main > div').forEach(p => p.classList.toggle('hidden', p.id !== 'page-' + tab));
+  if (tab === 'dashboard') loadDashboard();
+  if (tab === 'tasks') loadTasks();
+  if (tab === 'experiences') loadExps();
+}
+
+async function loadDashboard() {
+  try {
+    const [stats, recent] = await Promise.all([
+      fetchJSON(API + '/api/stats'),
+      fetchJSON(API + '/api/tasks?limit=5')
+    ]);
+    document.getElementById('stat-pending').textContent = stats.pending_tasks;
+    document.getElementById('stat-in_progress').textContent = stats.in_progress_tasks;
+    document.getElementById('stat-archived').textContent = stats.archived_tasks;
+    document.getElementById('stat-exception').textContent = stats.exception_tasks;
+    renderChart(stats.daily_stats || []);
+    renderRecentTasks(recent);
+  } catch(e) { console.error(e); }
+}
+
+function renderChart(daily) {
+  const el = document.getElementById('chart-bars');
+  if (!daily || daily.length === 0) {
+    el.innerHTML = '<div class="empty" style="padding:20px">暂无数据</div>';
+    return;
+  }
+  const max = Math.max(...daily.map(d => d.count), 1);
+  el.innerHTML = daily.map(d => `
+    <div class="bar-wrap">
+      <div class="bar" style="height:${(d.count / max) * 80}px"></div>
+      <div class="bar-label">${d.date ? d.date.slice(5) : ''}</div>
+    </div>
+  `).join('');
+}
+
+function renderRecentTasks(list) {
+  const el = document.getElementById('recent-list');
+  if (!list || list.length === 0) {
+    el.innerHTML = '<div class="empty">暂无任务</div>';
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr><th>标题</th><th>模块</th><th>状态</th><th>时间</th></tr></thead>
+    <tbody>${list.map(t => `
+      <tr onclick="viewTask('${t.id}')" style="cursor:pointer">
+        <td><div class="task-title-cell"><div class="title">${esc(t.title)}</div></div></td>
+        <td style="color:var(--text-secondary);font-size:12px">${esc(t.module || '-')}</td>
+        <td>${statusTag(t.status)}</td>
+        <td style="color:var(--text-secondary);font-size:12px">${fmt(t.created_at)}</td>
+      </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+async function loadTasks() {
+  const status = document.getElementById('filter-status').value;
+  const url = API + '/api/tasks' + (status ? '?status=' + status : '');
+  try {
+    tasks = await fetchJSON(url);
+    renderTaskTable(tasks);
+  } catch(e) { console.error(e); }
+}
+
+function renderTaskTable(list) {
+  const el = document.getElementById('task-list');
+  document.getElementById('task-count').textContent = list.length + ' 条任务';
+  if (!list || list.length === 0) {
+    el.innerHTML = '<div class="empty">暂无任务</div>';
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr><th>标题</th><th>状态</th><th>版本</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody>${list.map(t => `
+      <tr>
+        <td>
+          <div class="task-title-cell">
+            <div class="title">${esc(t.title)}</div>
+            ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ''}
+          </div>
+        </td>
+        <td>${statusTag(t.status)}</td>
+        <td style="color:var(--text-secondary);font-size:12px">${esc(t.version || '-')}</td>
+        <td style="color:var(--text-secondary);font-size:12px">${fmt(t.created_at)}</td>
+        <td>
+          <button class="btn btn-secondary btn-small" onclick="viewTask('${t.id}')">查看</button>
+          <button class="btn btn-warning btn-small" onclick="claimTask('${t.id}')">认领</button>
+          <button class="btn btn-danger btn-small" onclick="archiveTask('${t.id}')">归档</button>
+        </td>
+      </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+async function loadExps() {
+  const module = document.getElementById('exp-search').value;
+  const url = API + '/api/experiences' + (module ? '?module=' + encodeURIComponent(module) : '');
+  try {
+    exps = await fetchJSON(url);
+    renderExpTable(exps);
+  } catch(e) { console.error(e); }
+}
+
+function renderExpTable(list) {
+  const el = document.getElementById('exp-list');
+  document.getElementById('exp-count').textContent = list.length + ' 条经验';
+  if (!list || list.length === 0) {
+    el.innerHTML = '<div class="empty">暂无经验</div>';
+    return;
+  }
+  el.innerHTML = `<table>
+    <thead><tr><th>模块</th><th>关键词</th><th>适用场景</th><th>操作</th></tr></thead>
+    <tbody>${list.map(e => `
+      <tr>
+        <td style="font-weight:500">${esc(e.module)}</td>
+        <td style="font-size:12px;color:var(--text-secondary)">${esc(e.keywords || '-')}</td>
+        <td style="font-size:12px;color:var(--text-secondary)">${esc(e.scene || '-')}</td>
+        <td>
+          <button class="btn btn-secondary btn-small" onclick="viewExp('${e.id}')">查看</button>
+          <button class="btn btn-danger btn-small" onclick="deleteExp('${e.id}')">删除</button>
+        </td>
+      </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+// Task actions
+async function claimTask(id) {
+  await fetch(API + '/api/tasks/' + id + '/status', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({status: 'in_progress', maintainer: 'factory-agent'})
+  });
+  if (currentTab === 'dashboard') loadDashboard();
+  else if (currentTab === 'tasks') loadTasks();
+}
+
+async function archiveTask(id) {
+  await fetch(API + '/api/tasks/' + id + '/status', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({status: 'archived'})
+  });
+  if (currentTab === 'dashboard') loadDashboard();
+  else if (currentTab === 'tasks') loadTasks();
+}
+
+function viewTask(id) {
+  const t = tasks.find(t => t.id === id);
+  if (!t) { loadTasks().then(() => viewTask(id)); return; }
+  document.getElementById('task-modal-title').textContent = '任务详情';
+  document.getElementById('task-id').value = t.id;
+  document.getElementById('task-title').value = t.title;
+  document.getElementById('task-title').readOnly = true;
+  document.getElementById('task-desc').value = t.description || '';
+  document.getElementById('task-desc').readOnly = true;
+  document.getElementById('task-exp-id').value = t.experience_id || '';
+  document.getElementById('task-module').value = t.module || '';
+  document.getElementById('task-module').readOnly = true;
+  document.getElementById('task-resources').value = t.resources || '';
+  document.getElementById('task-acceptance').value = t.acceptance || '';
+  document.getElementById('task-acceptance').readOnly = true;
+  document.getElementById('task-submit-btn').classList.add('hidden');
+  document.getElementById('task-modal').classList.remove('hidden');
+}
+
+function showTaskModal(task) {
+  document.getElementById('task-modal-title').textContent = task ? '编辑任务' : '新建任务';
+  document.getElementById('task-id').value = '';
+  document.getElementById('task-title').value = '';
+  document.getElementById('task-title').readOnly = false;
+  document.getElementById('task-desc').value = '';
+  document.getElementById('task-desc').readOnly = false;
+  document.getElementById('task-exp-id').value = '';
+  document.getElementById('task-module').value = '';
+  document.getElementById('task-module').readOnly = false;
+  document.getElementById('task-resources').value = '';
+  document.getElementById('task-acceptance').value = '';
+  document.getElementById('task-acceptance').readOnly = false;
+  document.getElementById('task-submit-btn').classList.remove('hidden');
+  document.getElementById('task-modal').classList.remove('hidden');
+}
+
+function closeTaskModal() {
+  document.getElementById('task-modal').classList.add('hidden');
+}
+
+async function submitTask() {
+  const title = document.getElementById('task-title').value.trim();
+  if (!title) { alert('请输入标题'); return; }
+  const body = {
+    title,
+    description: document.getElementById('task-desc').value,
+    experience_id: document.getElementById('task-exp-id').value,
+    module: document.getElementById('task-module').value,
+    resources: document.getElementById('task-resources').value,
+    acceptance: document.getElementById('task-acceptance').value
+  };
+  await fetch(API + '/api/tasks', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  closeTaskModal();
+  loadDashboard();
+  if (currentTab === 'tasks') loadTasks();
+}
+
+// Exp actions
+function viewExp(id) {
+  const e = exps.find(e => e.id === id);
+  if (!e) { loadExps().then(() => viewExp(id)); return; }
+  document.getElementById('exp-modal-title').textContent = '经验详情: ' + e.module;
+  document.getElementById('exp-id').value = e.id;
+  document.getElementById('exp-module').value = e.module;
+  document.getElementById('exp-module').readOnly = true;
+  document.getElementById('exp-keywords').value = e.keywords || '';
+  document.getElementById('exp-log-paths').value = e.log_paths || '';
+  document.getElementById('exp-tool-usage').value = e.tool_usage || '';
+  document.getElementById('exp-scene').value = e.scene || '';
+  document.getElementById('exp-log-samples').value = e.log_samples || '';
+  document.getElementById('exp-code-snippets').value = e.code_snippets || '';
+  document.getElementById('exp-submit-btn').classList.add('hidden');
+  document.getElementById('exp-modal').classList.remove('hidden');
+}
+
+function showExpModal(exp) {
+  document.getElementById('exp-modal-title').textContent = exp ? '编辑经验' : '添加经验';
+  document.getElementById('exp-id').value = '';
+  document.getElementById('exp-module').value = '';
+  document.getElementById('exp-module').readOnly = false;
+  document.getElementById('exp-keywords').value = '';
+  document.getElementById('exp-log-paths').value = '';
+  document.getElementById('exp-tool-usage').value = '';
+  document.getElementById('exp-scene').value = '';
+  document.getElementById('exp-log-samples').value = '';
+  document.getElementById('exp-code-snippets').value = '';
+  document.getElementById('exp-submit-btn').classList.remove('hidden');
+  document.getElementById('exp-modal').classList.remove('hidden');
+}
+
+function closeExpModal() {
+  document.getElementById('exp-modal').classList.add('hidden');
+}
+
+async function submitExp() {
+  const module = document.getElementById('exp-module').value.trim();
+  if (!module) { alert('请输入模块名'); return; }
+  await fetch(API + '/api/experiences', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      module,
+      keywords: document.getElementById('exp-keywords').value,
+      log_paths: document.getElementById('exp-log-paths').value,
+      tool_usage: document.getElementById('exp-tool-usage').value,
+      scene: document.getElementById('exp-scene').value,
+      log_samples: document.getElementById('exp-log-samples').value,
+      code_snippets: document.getElementById('exp-code-snippets').value
+    })
+  });
+  closeExpModal();
+  loadExps();
+}
+
+async function deleteExp(id) {
+  if (!confirm('确认删除这条经验？')) return;
+  await fetch(API + '/api/experiences/' + id, {method: 'DELETE'});
+  loadExps();
+}
+
+// Helpers
+async function fetchJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function statusTag(status) {
+  const labels = {pending: '待认领', in_progress: '进行中', archived: '已完成', exception: '异常'};
+  return `<span class="status-pill status-${status}">${labels[status] || status}</span>`;
+}
+
+function fmt(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  return d.toLocaleDateString('zh-CN', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
+}
+
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+</script>
+</body>
+</html>
