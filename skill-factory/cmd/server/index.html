@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Skill Factory</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <style>
 :root {
   --bg: #f8fafc;
@@ -165,7 +167,8 @@ tr:last-child td { border-bottom: none; }
 }
 .modal h2 { font-size: 18px; margin-bottom: 20px; }
 .form-group { margin-bottom: 16px; }
-.form-group label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.form-group label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
+.field-hint { font-size: 11px; color: var(--text-secondary); background: var(--hover); padding: 2px 8px; border-radius: 4px; font-weight: 400; }
 .form-group input, .form-group textarea, .form-group select {
   width: 100%;
   padding: 10px 12px;
@@ -186,6 +189,16 @@ tr:last-child td { border-bottom: none; }
 
 /* Automation placeholder */
 .placeholder-page { text-align: center; padding: 80px 40px; color: var(--text-secondary); font-size: 14px; }
+
+/* Terminal */
+.terminal-wrap { background: #0f172a; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
+.terminal-header { background: #1e293b; padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
+.terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+.terminal-dot.red { background: #ef4444; }
+.terminal-dot.yellow { background: #f59e0b; }
+.terminal-dot.green { background: #22c55e; }
+.terminal-title { color: #94a3b8; font-size: 12px; margin-left: 8px; }
+#terminal { height: 400px; padding: 8px; }
 </style>
 </head>
 <body>
@@ -201,6 +214,7 @@ tr:last-child td { border-bottom: none; }
     <div class="nav-item" data-tab="tasks" onclick="switchTab('tasks')">📋 任务</div>
     <div class="nav-item" data-tab="experiences" onclick="switchTab('experiences')">📚 经验库</div>
     <div class="nav-item" data-tab="automation" onclick="switchTab('automation')">⚡ 自动化</div>
+    <div class="nav-item" data-tab="aichat" onclick="switchTab('aichat')">🤖 AI 对话</div>
   </nav>
   <div class="sidebar-footer">
     <div class="nav-item">⚙️ 设置</div>
@@ -278,21 +292,38 @@ tr:last-child td { border-bottom: none; }
     <h1 class="page-title">自动化</h1>
     <div class="placeholder-page">⚡ 自动化执行面板开发中</div>
   </div>
+
+  <!-- AI Chat -->
+  <div id="page-aichat" class="hidden">
+    <h1 class="page-title">🤖 AI 对话</h1>
+    <div class="terminal-wrap">
+      <div class="terminal-header">
+        <div class="terminal-dot red"></div>
+        <div class="terminal-dot yellow"></div>
+        <div class="terminal-dot green"></div>
+        <div class="terminal-title">Skill Factory AI Terminal</div>
+      </div>
+      <div id="terminal"></div>
+    </div>
+    <div style="font-size:12px;color:var(--text-secondary);text-align:center">
+      直接输入命令，如"帮我添加一条 redis-cluster 经验"或"查看待认领任务"
+    </div>
+  </div>
 </main>
 
 <!-- Task Modal -->
-<div id="task-modal" class="modal-overlay hidden">
+<div id="task-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeTaskModal()">
   <div class="modal">
     <h2 id="task-modal-title">新建任务</h2>
     <input type="hidden" id="task-id">
-    <div class="form-group"><label>标题 *</label><input id="task-title" placeholder="任务标题"></div>
-    <div class="form-group"><label>描述</label><textarea id="task-desc" placeholder="详细描述..."></textarea></div>
+    <div class="form-group"><label>标题 <span class="field-hint">必填</span></label><input id="task-title" placeholder="任务标题"></div>
+    <div class="form-group"><label>描述 <span class="field-hint">详细描述问题和背景</span></label><textarea id="task-desc" placeholder="详细描述..."></textarea></div>
     <div class="form-row">
       <div class="form-group"><label>关联经验ID</label><input id="task-exp-id" placeholder="可留空"></div>
-      <div class="form-group"><label>模块</label><input id="task-module" placeholder="如 redis-cluster"></div>
+      <div class="form-group"><label>模块<span class="field-hint">如 redis-cluster</span></label><input id="task-module" placeholder="如 redis-cluster"></div>
     </div>
-    <div class="form-group"><label>资源链接</label><input id="task-resources" placeholder="仓库地址或文档链接"></div>
-    <div class="form-group"><label>验收标准</label><textarea id="task-acceptance" class="code" placeholder="正向用例:\n输入... → 输出...\n\n反向用例:\n输入... → 预期行为..."></textarea></div>
+    <div class="form-group"><label>资源链接 <span class="field-hint">仓库地址或文档链接</span></label><input id="task-resources" placeholder="仓库地址或文档链接"></div>
+    <div class="form-group"><label>验收标准 <span class="field-hint">正向+反向用例</span></label><textarea id="task-acceptance" class="code" placeholder="正向用例:\n输入... → 输出...\n\n反向用例:\n输入... → 预期行为..."></textarea></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeTaskModal()">取消</button>
       <button id="task-submit-btn" class="btn btn-primary" onclick="submitTask()">创建</button>
@@ -301,17 +332,20 @@ tr:last-child td { border-bottom: none; }
 </div>
 
 <!-- Exp Modal -->
-<div id="exp-modal" class="modal-overlay hidden">
+<div id="exp-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeExpModal()">
   <div class="modal">
     <h2 id="exp-modal-title">添加经验</h2>
     <input type="hidden" id="exp-id">
-    <div class="form-group"><label>模块 *</label><input id="exp-module" placeholder="如 redis-cluster"></div>
-    <div class="form-group"><label>关键词</label><textarea id="exp-keywords" placeholder="CLUSTERDOWN, MOVED redirect, READONLY..."></textarea></div>
-    <div class="form-group"><label>日志路径</label><input id="exp-log-paths" placeholder="/var/log/redis/redis-server.log"></div>
-    <div class="form-group"><label>工具命令</label><textarea id="exp-tool-usage" placeholder="redis-cli cluster nodes\nredis-cli slowlog get 10"></textarea></div>
-    <div class="form-group"><label>适用场景</label><textarea id="exp-scene" placeholder="集群节点失联定位\n内存异常增长分析"></textarea></div>
-    <div class="form-group"><label>日志样例</label><textarea id="exp-log-samples" class="code" placeholder="# CLUSTERDOWN\nThe cluster is gone"></textarea></div>
-    <div class="form-group"><label>代码片段</label><textarea id="exp-code-snippets" class="code" placeholder="配置文件调整示例..."></textarea></div>
+    <div class="form-group"><label>模块 <span class="field-hint">必填 · 分类标识</span></label><input id="exp-module" placeholder="如 redis-cluster"></div>
+    <div class="form-group">
+      <label>关键词 <span class="field-hint">用于程序化匹配问题特征</span></label>
+      <textarea id="exp-keywords" placeholder="CLUSTERDOWN, MOVED redirect, READONLY..."></textarea>
+    </div>
+    <div class="form-group"><label>日志路径 <span class="field-hint">日志文件路径</span></label><input id="exp-log-paths" placeholder="/var/log/redis/redis-server.log"></div>
+    <div class="form-group"><label>工具命令 <span class="field-hint">常用 CLI 命令</span></label><textarea id="exp-tool-usage" placeholder="redis-cli cluster nodes\nredis-cli slowlog get 10"></textarea></div>
+    <div class="form-group"><label>适用场景 <span class="field-hint">该经验适用的业务场景</span></label><textarea id="exp-scene" placeholder="集群节点失联定位\n内存异常增长分析"></textarea></div>
+    <div class="form-group"><label>日志样例 <span class="field-hint">典型日志片段供人工比对</span></label><textarea id="exp-log-samples" class="code" placeholder="# CLUSTERDOWN\nThe cluster is gone"></textarea></div>
+    <div class="form-group"><label>代码片段 <span class="field-hint">配置或解决代码示例</span></label><textarea id="exp-code-snippets" class="code" placeholder="配置文件调整示例..."></textarea></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeExpModal()">取消</button>
       <button id="exp-submit-btn" class="btn btn-primary" onclick="submitExp()">添加</button>
@@ -329,6 +363,7 @@ let exps = [];
 // Init
 document.getElementById('filter-status').addEventListener('change', loadTasks);
 document.getElementById('exp-search').addEventListener('input', debounce(loadExps, 300));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeTaskModal(); closeExpModal(); } });
 loadDashboard();
 
 function switchTab(tab) {
@@ -338,6 +373,7 @@ function switchTab(tab) {
   if (tab === 'dashboard') loadDashboard();
   if (tab === 'tasks') loadTasks();
   if (tab === 'experiences') loadExps();
+  if (tab === 'aichat') initTerminal();
 }
 
 async function loadDashboard() {
@@ -399,11 +435,12 @@ async function loadTasks() {
 
 function renderTaskTable(list) {
   const el = document.getElementById('task-list');
-  document.getElementById('task-count').textContent = list.length + ' 条任务';
   if (!list || list.length === 0) {
     el.innerHTML = '<div class="empty">暂无任务</div>';
+    document.getElementById('task-count').textContent = '0 条任务';
     return;
   }
+  document.getElementById('task-count').textContent = list.length + ' 条任务';
   el.innerHTML = `<table>
     <thead><tr><th>标题</th><th>状态</th><th>版本</th><th>创建时间</th><th>操作</th></tr></thead>
     <tbody>${list.map(t => `
@@ -437,11 +474,12 @@ async function loadExps() {
 
 function renderExpTable(list) {
   const el = document.getElementById('exp-list');
-  document.getElementById('exp-count').textContent = list.length + ' 条经验';
   if (!list || list.length === 0) {
     el.innerHTML = '<div class="empty">暂无经验</div>';
+    document.getElementById('exp-count').textContent = '0 条经验';
     return;
   }
+  document.getElementById('exp-count').textContent = list.length + ' 条经验';
   el.innerHTML = `<table>
     <thead><tr><th>模块</th><th>关键词</th><th>适用场景</th><th>操作</th></tr></thead>
     <tbody>${list.map(e => `
@@ -464,8 +502,7 @@ async function claimTask(id) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({status: 'in_progress', maintainer: 'factory-agent'})
   });
-  if (currentTab === 'dashboard') loadDashboard();
-  else if (currentTab === 'tasks') loadTasks();
+  reloadCurrentTab();
 }
 
 async function archiveTask(id) {
@@ -474,8 +511,13 @@ async function archiveTask(id) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({status: 'archived'})
   });
+  reloadCurrentTab();
+}
+
+function reloadCurrentTab() {
   if (currentTab === 'dashboard') loadDashboard();
   else if (currentTab === 'tasks') loadTasks();
+  else if (currentTab === 'experiences') loadExps();
 }
 
 function viewTask(id) {
@@ -628,6 +670,38 @@ function esc(s) {
 function debounce(fn, ms) {
   let t;
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+
+// Terminal (xterm.js)
+let term;
+let ws;
+let termReady = false;
+
+function initTerminal() {
+  if (term) return;
+  term = new Terminal({
+    fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
+    fontSize: 13,
+    theme: { background: '#0f172a', foreground: '#e2e8f0', cursor: '#22d3ee' },
+    cursorBlink: true,
+    scrollback: 10000,
+  });
+  term.open(document.getElementById('terminal'));
+
+  ws = new WebSocket('ws://' + window.location.host + '/api/pty');
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { termReady = true; term.writeln('\x1b[32mSkill Factory AI Terminal\x1b[0m\r\nType your request in natural language, e.g. "帮我添加一条 redis-cluster 经验"\r\n'); };
+  ws.ondata = (e) => {
+    if (termReady) term.write(new Uint8Array(e.data));
+  };
+  ws.onclose = () => { term.writeln('\r\n\x1b[33mConnection closed. Refresh to reconnect.\x1b[0m'); termReady = false; };
+  ws.onerror = (e) => { term.writeln('\r\n\x1b[31mWebSocket error\x1b[0m'); };
+  term.onData(data => { if (ws && ws.readyState === 1) ws.send(data); });
+  term.onResize(() => {
+    if (ws && ws.readyState === 1) {
+      ws.send('resize,' + term.cols + ',' + term.rows);
+    }
+  });
 }
 </script>
 </body>
