@@ -1,3 +1,6 @@
 .superpowers/brainstorm/99321-1780671144/state/server.pid
 .superpowers/brainstorm/99321-1780671144/state/server.log
 .superpowers/brainstorm/99321-1780671144/state/server-stopped
+
+# AI 任务系统运行产物
+ai-task-system/workspace/
