@@ -3,221 +3,78 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Skill Factory</title>
+<title>工作台 · Workbench</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
-<style>
-:root {
-  --bg: #f8fafc;
-  --card-bg: #ffffff;
-  --sidebar-bg: #ffffff;
-  --sidebar-border: #e2e8f0;
-  --text-primary: #1e293b;
-  --text-secondary: #94a3b8;
-  --border: #e2e8f0;
-  --hover: #f1f5f9;
-  --primary: #2563eb;
-  --success: #16a34a;
-  --warning: #ca8a04;
-  --danger: #dc2626;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text-primary);
-  display: flex;
-  min-height: 100vh;
-}
-
-/* Sidebar */
-.sidebar {
-  width: 160px;
-  flex-shrink: 0;
-  background: var(--sidebar-bg);
-  border-right: 1px solid var(--sidebar-border);
-  display: flex;
-  flex-direction: column;
-  padding: 24px 0;
-}
-.logo { padding: 0 20px 24px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
-.logo-main { font-size: 18px; font-weight: 600; color: var(--text-primary); }
-.logo-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
-.nav { flex: 1; }
-.nav-item {
-  padding: 10px 20px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-left: 2px solid transparent;
-  transition: all 0.2s;
-}
-.nav-item:hover { color: var(--text-primary); background: var(--hover); }
-.nav-item.active { color: var(--primary); border-left-color: var(--primary); font-weight: 500; }
-.sidebar-footer { padding: 0 20px; border-top: 1px solid var(--border); margin-top: auto; }
-.sidebar-footer .nav-item { font-size: 12px; }
-
-/* Main */
-.main { flex: 1; padding: 28px; overflow-y: auto; }
-.page-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
-.hidden { display: none !important; }
-
-/* Stat Cards */
-.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
-.stat-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 20px;
-}
-.stat-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
-.stat-value { font-size: 32px; font-weight: 600; }
-.stat-pending .stat-value { color: var(--warning); }
-.stat-in_progress .stat-value { color: var(--primary); }
-.stat-archived .stat-value { color: var(--success); }
-.stat-exception .stat-value { color: var(--danger); }
-
-/* Bar Chart */
-.chart-section { background: var(--card-bg); border: 1px solid var(--border); border-radius: 4px; padding: 20px; margin-bottom: 24px; }
-.chart-title { font-size: 14px; font-weight: 500; margin-bottom: 16px; }
-.chart-bars { display: flex; align-items: flex-end; gap: 8px; height: 80px; }
-.bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.bar {
-  width: 100%;
-  max-width: 32px;
-  background: linear-gradient(to top, #fed7aa, #c2410c);
-  border-radius: 2px 2px 0 0;
-  min-height: 4px;
-}
-.bar-label { font-size: 11px; color: var(--text-secondary); }
-
-/* Recent Tasks */
-.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.section-title { font-size: 16px; font-weight: 500; }
-
-/* Table */
-table { width: 100%; border-collapse: collapse; background: var(--card-bg); border-radius: 4px; overflow: hidden; }
-th { text-align: left; padding: 12px 16px; font-size: 11px; font-weight: 500; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
-td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
-tr:hover td { background: var(--hover); }
-tr:last-child td { border-bottom: none; }
-.task-title-cell { max-width: 300px; }
-.task-title-cell .title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.task-title-cell .desc { font-size: 11px; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
-
-/* Status Pill */
-.status-pill { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 500; }
-.status-pending { background: rgba(202,138,4,0.1); color: var(--warning); }
-.status-in_progress { background: rgba(37,99,235,0.1); color: var(--primary); }
-.status-archived { background: rgba(22,163,74,0.1); color: var(--success); }
-.status-exception { background: rgba(220,38,38,0.1); color: var(--danger); }
-
-/* Toolbar */
-.toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
-.toolbar select, .toolbar input {
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 13px;
-  outline: none;
-  font-family: inherit;
-  background: var(--card-bg);
-}
-.toolbar select:focus, .toolbar input:focus { border-color: var(--primary); }
-.toolbar .spacer { flex: 1; }
-.toolbar .count { font-size: 12px; color: var(--text-secondary); }
-
-/* Buttons */
-.btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: opacity 0.2s;
-  font-family: inherit;
-}
-.btn:hover { opacity: 0.85; }
-.btn-primary { background: var(--primary); color: #fff; }
-.btn-secondary { background: var(--text-secondary); color: #fff; }
-.btn-small { padding: 4px 10px; font-size: 12px; }
-.btn-danger { background: var(--danger); color: #fff; }
-.btn-warning { background: var(--warning); color: #fff; }
-
-/* Modal */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  animation: fadeIn 150ms ease-out;
-}
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-.modal {
-  background: #fff;
-  border-radius: 16px;
-  padding: 28px;
-  max-width: 600px;
-  width: 90vw;
-  max-height: 85vh;
-  overflow-y: auto;
-}
-.modal h2 { font-size: 18px; margin-bottom: 20px; }
-.form-group { margin-bottom: 16px; }
-.form-group label { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; }
-.field-hint { font-size: 11px; color: var(--text-secondary); background: var(--hover); padding: 2px 8px; border-radius: 4px; font-weight: 400; }
-.form-group input, .form-group textarea, .form-group select {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 13px;
-  outline: none;
-  font-family: inherit;
-}
-.form-group input:focus, .form-group textarea:focus, .form-group select:focus { border-color: var(--primary); }
-.form-group textarea { resize: vertical; min-height: 80px; }
-.form-group textarea.code { font-family: monospace; font-size: 12px; }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
-
-/* Empty */
-.empty { text-align: center; padding: 48px; color: var(--text-secondary); font-size: 14px; }
-
-/* Automation placeholder */
-.placeholder-page { text-align: center; padding: 80px 40px; color: var(--text-secondary); font-size: 14px; }
-
-/* Terminal */
-.terminal-wrap { background: #0f172a; border-radius: 8px; overflow: hidden; margin-bottom: 16px; }
-.terminal-header { background: #1e293b; padding: 8px 12px; display: flex; align-items: center; gap: 8px; }
-.terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
-.terminal-dot.red { background: #ef4444; }
-.terminal-dot.yellow { background: #f59e0b; }
-.terminal-dot.green { background: #22c55e; }
-.terminal-title { color: #94a3b8; font-size: 12px; margin-left: 8px; }
-#terminal { height: 400px; padding: 8px; }
-</style>
+<link rel="stylesheet" href="/static/css/base.css">
 </head>
 <body>
 
 <!-- Sidebar -->
-<aside class="sidebar">
+<aside class="sidebar" id="sidebar">
   <div class="logo">
-    <div class="logo-main">⚙️ Skill Factory</div>
-    <div class="logo-sub">自动化开发工厂</div>
+    <span class="logo-icon">⚡</span>
+    <div>
+      <div class="logo-main">工作台</div>
+      <div class="logo-sub">Workbench</div>
+    </div>
   </div>
+  <div class="toggle-sidebar" onclick="toggleSidebar()" title="收起/展开">☰ <span class="toggle-label">收起</span></div>
   <nav class="nav">
-    <div class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')">📊 总览</div>
-    <div class="nav-item" data-tab="tasks" onclick="switchTab('tasks')">📋 任务</div>
-    <div class="nav-item" data-tab="experiences" onclick="switchTab('experiences')">📚 经验库</div>
-    <div class="nav-item" data-tab="automation" onclick="switchTab('automation')">⚡ 自动化</div>
-    <div class="nav-item" data-tab="aichat" onclick="switchTab('aichat')">🤖 AI 对话</div>
+    <div class="nav-item active" data-tab="dashboard" onclick="switchTab('dashboard')" data-tooltip="总览&#10;任务统计 / 7天柱图 / 最近任务&#10;调度器状态 / 最近执行">
+      <span class="nav-icon">📊</span><span class="nav-text">总览</span>
+    </div>
+    <div class="nav-item" data-tab="tasks" onclick="switchTab('tasks')" data-tooltip="任务&#10;手动创建的工作项（待认领/进行中/已完成）&#10;可查看 / 认领 / 归档">
+      <span class="nav-icon">📋</span><span class="nav-text">任务</span>
+    </div>
+    <div class="nav-item" data-tab="experiences" onclick="switchTab('experiences')" data-tooltip="经验库&#10;模块化最佳实践&#10;关键词/日志路径/工具命令/适用场景">
+      <span class="nav-icon">📚</span><span class="nav-text">经验库</span>
+    </div>
+    <div class="nav-item" data-tab="automation" onclick="switchTab('automation')" data-tooltip="自动化&#10;定时任务（cron）+ 调度器启停&#10;AI CLI（claude/cbc/shell）定时执行">
+      <span class="nav-icon">⚡</span><span class="nav-text">自动化</span>
+    </div>
+    <div class="nav-item" data-tab="aichat" onclick="switchTab('aichat')" data-tooltip="AI 对话&#10;终端式 Claude Code 交互（PTY）&#10;macOS / Linux 实时">
+      <span class="nav-icon">🤖</span><span class="nav-text">AI 对话</span>
+    </div>
   </nav>
+
+  <!-- 目录 widget（紧贴 AI 对话 nav 下面，常驻） -->
+  <div class="sidebar-todo">
+    <div class="todo-head">
+      <span class="todo-head-icon">📂</span>
+      <span class="todo-head-text">目录</span>
+      <span class="todo-head-actions">
+        <button class="btn btn-small" onclick="showDirModal()" title="添加">+</button>
+      </span>
+    </div>
+    <div id="dir-list" class="dir-list"><div style="color:var(--text-secondary);font-size:12px;padding:4px">暂无目录</div></div>
+  </div>
+
   <div class="sidebar-footer">
-    <div class="nav-item">⚙️ 设置</div>
+    <div class="nav-item theme-btn" id="theme-btn" onclick="toggleTheme()">
+      <span class="nav-icon">🌙</span><span class="nav-text theme-btn-text">主题</span>
+    </div>
+  </div>
+</aside>
+
+<!-- Widget Sidebar：链接 + 待办 上下排列 -->
+<aside class="widget-sidebar">
+  <div class="widget">
+    <div class="widget-title">
+      <span>🔗 快捷链接</span>
+      <button class="btn btn-small" onclick="showLinkModal()">+ 添加</button>
+    </div>
+    <div id="links-grid" class="link-list"></div>
+  </div>
+  <div class="widget">
+    <div class="widget-title">
+      <span>☑️ 待办</span>
+      <span>
+        <button class="btn btn-small" onclick="showTodoAddModal()">+ 添加</button>
+        <button class="btn btn-small" onclick="showTodoPathModal()">设置</button>
+      </span>
+    </div>
+    <div id="todo-list" class="todo-list"><div style="color:var(--text-secondary);font-size:12px;padding:4px">未配置 todo.md 路径</div></div>
   </div>
 </aside>
 
@@ -255,6 +112,29 @@ tr:last-child td { border-bottom: none; }
       <button class="btn btn-primary btn-small" onclick="showTaskModal()">+ 新建任务</button>
     </div>
     <div id="recent-list"></div>
+
+    <!-- 总览 Tab 顶部 2 列：调度器 + 最近执行（待办已移到 sidebar） -->
+    <div class="dashboard-row">
+      <div class="widget" id="dash-sched-widget">
+        <div class="widget-title">
+          <span>⏰ 调度器</span>
+          <span id="scheduler-badge"></span>
+        </div>
+        <div style="display:flex;gap:6px;margin-bottom:12px">
+          <button class="btn btn-small" data-sched-action="start" onclick="schedulerStart()">启动</button>
+          <button class="btn btn-small" data-sched-action="stop" onclick="schedulerStop()">停止</button>
+          <button class="btn btn-small" data-sched-action="reload" onclick="schedulerReload()">重载</button>
+        </div>
+        <div id="scheduled-summary" class="scheduled-list" style="max-height:200px;overflow-y:auto"></div>
+      </div>
+      <div class="widget" id="dash-execs-widget" style="flex: 2">
+        <div class="widget-title">
+          <span>⚡ 最近执行</span>
+          <button class="btn btn-small" onclick="loadRecentExecutions()">刷新</button>
+        </div>
+        <div id="recent-execs" style="max-height:280px;overflow-y:auto"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Tasks -->
@@ -290,7 +170,18 @@ tr:last-child td { border-bottom: none; }
   <!-- Automation -->
   <div id="page-automation" class="hidden">
     <h1 class="page-title">自动化</h1>
-    <div class="placeholder-page">⚡ 自动化执行面板开发中</div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center">
+      <span id="scheduler-badge-2"></span>
+      <button class="btn" data-sched-action="start" onclick="schedulerStart()">▶ 启动</button>
+      <button class="btn" data-sched-action="stop" onclick="schedulerStop()">⏸ 停止</button>
+      <button class="btn" data-sched-action="reload" onclick="schedulerReload()">🔄 重载</button>
+      <div style="flex:1"></div>
+      <button class="btn btn-primary" onclick="showScheduledModal()">+ 新建定时任务</button>
+    </div>
+    <div id="scheduled-list"></div>
+
+    <h2 class="page-title" style="margin-top:32px">最近执行</h2>
+    <div id="exec-list" style="max-height:400px;overflow-y:auto"></div>
   </div>
 
   <!-- AI Chat -->
@@ -301,7 +192,7 @@ tr:last-child td { border-bottom: none; }
         <div class="terminal-dot red"></div>
         <div class="terminal-dot yellow"></div>
         <div class="terminal-dot green"></div>
-        <div class="terminal-title">Skill Factory AI Terminal</div>
+        <div class="terminal-title">工作台 · AI Terminal</div>
       </div>
       <div id="terminal"></div>
     </div>
@@ -318,15 +209,37 @@ tr:last-child td { border-bottom: none; }
     <input type="hidden" id="task-id">
     <div class="form-group"><label>标题 <span class="field-hint">必填</span></label><input id="task-title" placeholder="任务标题"></div>
     <div class="form-group"><label>描述 <span class="field-hint">详细描述问题和背景</span></label><textarea id="task-desc" placeholder="详细描述..."></textarea></div>
-    <div class="form-row">
-      <div class="form-group"><label>关联经验ID</label><input id="task-exp-id" placeholder="可留空"></div>
-      <div class="form-group"><label>模块<span class="field-hint">如 redis-cluster</span></label><input id="task-module" placeholder="如 redis-cluster"></div>
+    <div class="form-group">
+      <label>关联经验库 <span class="field-hint">点击右侧按钮多选</span></label>
+      <div style="display:flex;gap:8px;align-items:flex-start">
+        <div id="task-exps-list" style="flex:1;display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:6px;border:1px solid var(--border);border-radius:4px;background:var(--card-bg)"></div>
+        <button class="btn btn-small" type="button" onclick="openExpPicker()">📚 选择</button>
+      </div>
     </div>
-    <div class="form-group"><label>资源链接 <span class="field-hint">仓库地址或文档链接</span></label><input id="task-resources" placeholder="仓库地址或文档链接"></div>
+    <div class="form-row">
+      <div class="form-group"><label>模块<span class="field-hint">如 redis-cluster</span></label><input id="task-module" placeholder="如 redis-cluster"></div>
+      <div class="form-group"><label>资源链接 <span class="field-hint">仓库或文档</span></label><input id="task-resources" placeholder="仓库地址或文档链接"></div>
+    </div>
     <div class="form-group"><label>验收标准 <span class="field-hint">正向+反向用例</span></label><textarea id="task-acceptance" class="code" placeholder="正向用例:\n输入... → 输出...\n\n反向用例:\n输入... → 预期行为..."></textarea></div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeTaskModal()">取消</button>
       <button id="task-submit-btn" class="btn btn-primary" onclick="submitTask()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- Experience Picker Modal -->
+<div id="exp-picker-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeExpPicker()">
+  <div class="modal" style="max-width:700px">
+    <h2>选择经验库 <span style="font-size:12px;color:var(--text-secondary);font-weight:400">（可多选）</span></h2>
+    <div class="form-group">
+      <input id="exp-picker-search" placeholder="搜索 module / scene / keywords..." style="width:100%">
+    </div>
+    <div id="exp-picker-list" style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:8px"></div>
+    <div class="modal-actions">
+      <span id="exp-picker-count" style="margin-right:auto;color:var(--text-secondary);font-size:12px">已选 0 条</span>
+      <button class="btn btn-secondary" onclick="closeExpPicker()">取消</button>
+      <button class="btn btn-primary" onclick="confirmExpPicker()">确定</button>
     </div>
   </div>
 </div>
@@ -353,356 +266,142 @@ tr:last-child td { border-bottom: none; }
   </div>
 </div>
 
-<script>
-const API = '';
-
-let currentTab = 'dashboard';
-let tasks = [];
-let exps = [];
-
-// Init
-document.getElementById('filter-status').addEventListener('change', loadTasks);
-document.getElementById('exp-search').addEventListener('input', debounce(loadExps, 300));
-document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeTaskModal(); closeExpModal(); } });
-loadDashboard();
-
-function switchTab(tab) {
-  currentTab = tab;
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.tab === tab));
-  document.querySelectorAll('.main > div').forEach(p => p.classList.toggle('hidden', p.id !== 'page-' + tab));
-  if (tab === 'dashboard') loadDashboard();
-  if (tab === 'tasks') loadTasks();
-  if (tab === 'experiences') loadExps();
-  if (tab === 'aichat') initTerminal();
-}
-
-async function loadDashboard() {
-  try {
-    const [stats, recent] = await Promise.all([
-      fetchJSON(API + '/api/stats'),
-      fetchJSON(API + '/api/tasks?limit=5')
-    ]);
-    document.getElementById('stat-pending').textContent = stats.pending_tasks;
-    document.getElementById('stat-in_progress').textContent = stats.in_progress_tasks;
-    document.getElementById('stat-archived').textContent = stats.archived_tasks;
-    document.getElementById('stat-exception').textContent = stats.exception_tasks;
-    renderChart(stats.daily_stats || []);
-    renderRecentTasks(recent);
-  } catch(e) { console.error(e); }
-}
-
-function renderChart(daily) {
-  const el = document.getElementById('chart-bars');
-  if (!daily || daily.length === 0) {
-    el.innerHTML = '<div class="empty" style="padding:20px">暂无数据</div>';
-    return;
-  }
-  const max = Math.max(...daily.map(d => d.count), 1);
-  el.innerHTML = daily.map(d => `
-    <div class="bar-wrap">
-      <div class="bar" style="height:${(d.count / max) * 80}px"></div>
-      <div class="bar-label">${d.date ? d.date.slice(5) : ''}</div>
+<!-- Link Modal -->
+<div id="link-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeLinkModal()">
+  <div class="modal">
+    <h2>添加链接</h2>
+    <div class="form-group"><label>名称 <span class="field-hint">必填</span></label><input id="link-name" placeholder="如 GitHub"></div>
+    <div class="form-group"><label>URL <span class="field-hint">必填</span></label><input id="link-url" placeholder="https://..."></div>
+    <div class="form-group"><label>图标 URL <span class="field-hint">可选，留空用首字母占位</span></label><input id="link-icon" placeholder="https://.../favicon.ico"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeLinkModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitLink()">添加</button>
     </div>
-  `).join('');
-}
+  </div>
+</div>
 
-function renderRecentTasks(list) {
-  const el = document.getElementById('recent-list');
-  if (!list || list.length === 0) {
-    el.innerHTML = '<div class="empty">暂无任务</div>';
-    return;
-  }
-  el.innerHTML = `<table>
-    <thead><tr><th>标题</th><th>模块</th><th>状态</th><th>时间</th></tr></thead>
-    <tbody>${list.map(t => `
-      <tr onclick="viewTask('${t.id}')" style="cursor:pointer">
-        <td><div class="task-title-cell"><div class="title">${esc(t.title)}</div></div></td>
-        <td style="color:var(--text-secondary);font-size:12px">${esc(t.module || '-')}</td>
-        <td>${statusTag(t.status)}</td>
-        <td style="color:var(--text-secondary);font-size:12px">${fmt(t.created_at)}</td>
-      </tr>`).join('')}</tbody>
-  </table>`;
-}
+<!-- Dir Modal -->
+<div id="dir-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeDirModal()">
+  <div class="modal">
+    <h2>添加目录</h2>
+    <div class="form-group"><label>名称 <span class="field-hint">必填</span></label><input id="dir-name" placeholder="如 代码"></div>
+    <div class="form-group"><label>路径 <span class="field-hint">必填 · 本地绝对路径</span></label><input id="dir-path" placeholder="~/code 或 /Users/me/projects"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeDirModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitDir()">添加</button>
+    </div>
+  </div>
+</div>
 
-async function loadTasks() {
-  const status = document.getElementById('filter-status').value;
-  const url = API + '/api/tasks' + (status ? '?status=' + status : '');
-  try {
-    tasks = await fetchJSON(url);
-    renderTaskTable(tasks);
-  } catch(e) { console.error(e); }
-}
+<!-- Todo Path Modal -->
+<div id="todo-path-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeTodoPathModal()">
+  <div class="modal">
+    <h2>设置 todo.md 路径</h2>
+    <div class="form-group"><label>路径 <span class="field-hint">本地绝对路径</span></label><input id="todo-path-input" placeholder="/Users/me/notes/todo.md"></div>
+    <div style="font-size:11px;color:var(--text-secondary);margin-top:8px">支持 <code>- [ ]</code> 和 <code>- [x]</code> 格式，点击勾选框会自动写回文件（先 .bak 再原子 rename）。</div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeTodoPathModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitTodoPath()">保存</button>
+    </div>
+  </div>
+</div>
 
-function renderTaskTable(list) {
-  const el = document.getElementById('task-list');
-  if (!list || list.length === 0) {
-    el.innerHTML = '<div class="empty">暂无任务</div>';
-    document.getElementById('task-count').textContent = '0 条任务';
-    return;
-  }
-  document.getElementById('task-count').textContent = list.length + ' 条任务';
-  el.innerHTML = `<table>
-    <thead><tr><th>标题</th><th>状态</th><th>版本</th><th>创建时间</th><th>操作</th></tr></thead>
-    <tbody>${list.map(t => `
-      <tr>
-        <td>
-          <div class="task-title-cell">
-            <div class="title">${esc(t.title)}</div>
-            ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ''}
-          </div>
-        </td>
-        <td>${statusTag(t.status)}</td>
-        <td style="color:var(--text-secondary);font-size:12px">${esc(t.version || '-')}</td>
-        <td style="color:var(--text-secondary);font-size:12px">${fmt(t.created_at)}</td>
-        <td>
-          <button class="btn btn-secondary btn-small" onclick="viewTask('${t.id}')">查看</button>
-          <button class="btn btn-warning btn-small" onclick="claimTask('${t.id}')">认领</button>
-          <button class="btn btn-danger btn-small" onclick="archiveTask('${t.id}')">归档</button>
-        </td>
-      </tr>`).join('')}</tbody>
-  </table>`;
-}
+<!-- Todo Add Modal -->
+<div id="todo-add-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeTodoAddModal()">
+  <div class="modal">
+    <h2>添加待办</h2>
+    <div class="form-group"><label>内容 <span class="field-hint">必填</span></label><input id="todo-add-input" placeholder="如 写周报"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeTodoAddModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitTodoAdd()">添加</button>
+    </div>
+  </div>
+</div>
 
-async function loadExps() {
-  const module = document.getElementById('exp-search').value;
-  const url = API + '/api/experiences' + (module ? '?module=' + encodeURIComponent(module) : '');
-  try {
-    exps = await fetchJSON(url);
-    renderExpTable(exps);
-  } catch(e) { console.error(e); }
-}
+<!-- Scheduled Modal -->
+<div id="scheduled-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeScheduledModal()">
+  <div class="modal">
+    <h2>新建定时任务</h2>
+    <div class="form-group"><label>名称 <span class="field-hint">必填</span></label><input id="sched-name" placeholder="如 每分钟心跳"></div>
+    <div class="form-group">
+      <label>Cron 表达式 <span class="field-hint">必填</span></label>
+      <input id="sched-cron" placeholder="@every 30s  或  */5 * * * *">
+      <div style="font-size:11px;color:var(--text-secondary);margin-top:4px">
+        支持标准 5 字段 cron (分 时 日 月 周) 或 @every Ns / @hourly / @daily 等预设
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>命令类型</label>
+        <select id="sched-type">
+          <option value="shell">shell · 直接执行命令</option>
+          <option value="claude">claude · Claude Code</option>
+          <option value="cbc">cbc · Codebuddy (cbc/codebuddy)</option>
+        </select>
+      </div>
+      <div class="form-group"><label>模型 <span class="field-hint">可选 · claude/cbc 用</span></label><input id="sched-model" placeholder="sonnet / opus / ..."></div>
+    </div>
+    <div class="form-group">
+      <label>Prompt <span class="field-hint">必填 · shell 时为命令，claude/cbc 时为 prompt</span></label>
+      <textarea id="sched-prompt" rows="4" placeholder='claude/cbc: "请检查项目状态并提交周报"&#10;shell: "echo hello && date"'></textarea>
+    </div>
+    <div class="form-group">
+      <label>
+        <input type="checkbox" id="sched-enabled" checked> 启用
+      </label>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeScheduledModal()">取消</button>
+      <button class="btn btn-primary" onclick="submitScheduled()">创建</button>
+    </div>
+  </div>
+</div>
 
-function renderExpTable(list) {
-  const el = document.getElementById('exp-list');
-  if (!list || list.length === 0) {
-    el.innerHTML = '<div class="empty">暂无经验</div>';
-    document.getElementById('exp-count').textContent = '0 条经验';
-    return;
-  }
-  document.getElementById('exp-count').textContent = list.length + ' 条经验';
-  el.innerHTML = `<table>
-    <thead><tr><th>模块</th><th>关键词</th><th>适用场景</th><th>操作</th></tr></thead>
-    <tbody>${list.map(e => `
-      <tr>
-        <td style="font-weight:500">${esc(e.module)}</td>
-        <td style="font-size:12px;color:var(--text-secondary)">${esc(e.keywords || '-')}</td>
-        <td style="font-size:12px;color:var(--text-secondary)">${esc(e.scene || '-')}</td>
-        <td>
-          <button class="btn btn-secondary btn-small" onclick="viewExp('${e.id}')">查看</button>
-          <button class="btn btn-danger btn-small" onclick="deleteExp('${e.id}')">删除</button>
-        </td>
-      </tr>`).join('')}</tbody>
-  </table>`;
-}
+<!-- Execution Detail Modal -->
+<div id="exec-detail-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeExecDetailModal()">
+  <div class="modal" style="max-width:800px">
+    <h2>执行详情</h2>
+    <div id="exec-detail-meta" style="font-size:12px;color:var(--text-secondary);margin-bottom:12px"></div>
+    <div class="form-group">
+      <label>命令 <span class="field-hint">Command</span></label>
+      <textarea id="exec-detail-cmd" readonly class="code" rows="2" style="font-size:12px"></textarea>
+    </div>
+    <div class="form-group">
+      <label>输出 <span class="field-hint">stdout</span></label>
+      <textarea id="exec-detail-output" readonly class="code" rows="10" style="font-size:12px;white-space:pre"></textarea>
+    </div>
+    <div class="form-group">
+      <label>错误 <span class="field-hint">stderr</span></label>
+      <textarea id="exec-detail-error" readonly class="code" rows="3" style="font-size:12px"></textarea>
+    </div>
+    <div id="exec-detail-eval" style="background:var(--hover);padding:12px;border-radius:6px;margin-top:12px"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="runEvaluation()">📊 AI 评估</button>
+      <button class="btn btn-secondary" onclick="closeExecDetailModal()">关闭</button>
+    </div>
+  </div>
+</div>
 
-// Task actions
-async function claimTask(id) {
-  await fetch(API + '/api/tasks/' + id + '/status', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({status: 'in_progress', maintainer: 'factory-agent'})
-  });
-  reloadCurrentTab();
-}
+<!-- 共享 + widgets + 5 view JS（顺序：api → widgets → 5 view） -->
+<script src="/static/js/api.js"></script>
+<script src="/static/js/widgets.js"></script>
+<script src="/static/js/views/dashboard.js"></script>
+<script src="/static/js/views/tasks.js"></script>
+<script src="/static/js/views/experiences.js"></script>
+<script src="/static/js/views/automation.js"></script>
+<script src="/static/js/views/aichat.js"></script>
 
-async function archiveTask(id) {
-  await fetch(API + '/api/tasks/' + id + '/status', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({status: 'archived'})
-  });
-  reloadCurrentTab();
-}
+<!-- Init: 全局事件 + 首次加载 dashboard + widget 侧栏 -->
+<script>
+// 事件绑定（filter / search）
+document.getElementById('filter-status').addEventListener('change', () => { if (typeof loadTasks === 'function') loadTasks(); });
+document.getElementById('exp-search').addEventListener('input', debounce(() => { if (typeof loadExps === 'function') loadExps(); }, 300));
 
-function reloadCurrentTab() {
-  if (currentTab === 'dashboard') loadDashboard();
-  else if (currentTab === 'tasks') loadTasks();
-  else if (currentTab === 'experiences') loadExps();
-}
-
-function viewTask(id) {
-  const t = tasks.find(t => t.id === id);
-  if (!t) { loadTasks().then(() => viewTask(id)); return; }
-  document.getElementById('task-modal-title').textContent = '任务详情';
-  document.getElementById('task-id').value = t.id;
-  document.getElementById('task-title').value = t.title;
-  document.getElementById('task-title').readOnly = true;
-  document.getElementById('task-desc').value = t.description || '';
-  document.getElementById('task-desc').readOnly = true;
-  document.getElementById('task-exp-id').value = t.experience_id || '';
-  document.getElementById('task-module').value = t.module || '';
-  document.getElementById('task-module').readOnly = true;
-  document.getElementById('task-resources').value = t.resources || '';
-  document.getElementById('task-acceptance').value = t.acceptance || '';
-  document.getElementById('task-acceptance').readOnly = true;
-  document.getElementById('task-submit-btn').classList.add('hidden');
-  document.getElementById('task-modal').classList.remove('hidden');
-}
-
-function showTaskModal(task) {
-  document.getElementById('task-modal-title').textContent = task ? '编辑任务' : '新建任务';
-  document.getElementById('task-id').value = '';
-  document.getElementById('task-title').value = '';
-  document.getElementById('task-title').readOnly = false;
-  document.getElementById('task-desc').value = '';
-  document.getElementById('task-desc').readOnly = false;
-  document.getElementById('task-exp-id').value = '';
-  document.getElementById('task-module').value = '';
-  document.getElementById('task-module').readOnly = false;
-  document.getElementById('task-resources').value = '';
-  document.getElementById('task-acceptance').value = '';
-  document.getElementById('task-acceptance').readOnly = false;
-  document.getElementById('task-submit-btn').classList.remove('hidden');
-  document.getElementById('task-modal').classList.remove('hidden');
-}
-
-function closeTaskModal() {
-  document.getElementById('task-modal').classList.add('hidden');
-}
-
-async function submitTask() {
-  const title = document.getElementById('task-title').value.trim();
-  if (!title) { alert('请输入标题'); return; }
-  const body = {
-    title,
-    description: document.getElementById('task-desc').value,
-    experience_id: document.getElementById('task-exp-id').value,
-    module: document.getElementById('task-module').value,
-    resources: document.getElementById('task-resources').value,
-    acceptance: document.getElementById('task-acceptance').value
-  };
-  await fetch(API + '/api/tasks', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  });
-  closeTaskModal();
-  loadDashboard();
-  if (currentTab === 'tasks') loadTasks();
-}
-
-// Exp actions
-function viewExp(id) {
-  const e = exps.find(e => e.id === id);
-  if (!e) { loadExps().then(() => viewExp(id)); return; }
-  document.getElementById('exp-modal-title').textContent = '经验详情: ' + e.module;
-  document.getElementById('exp-id').value = e.id;
-  document.getElementById('exp-module').value = e.module;
-  document.getElementById('exp-module').readOnly = true;
-  document.getElementById('exp-keywords').value = e.keywords || '';
-  document.getElementById('exp-log-paths').value = e.log_paths || '';
-  document.getElementById('exp-tool-usage').value = e.tool_usage || '';
-  document.getElementById('exp-scene').value = e.scene || '';
-  document.getElementById('exp-log-samples').value = e.log_samples || '';
-  document.getElementById('exp-code-snippets').value = e.code_snippets || '';
-  document.getElementById('exp-submit-btn').classList.add('hidden');
-  document.getElementById('exp-modal').classList.remove('hidden');
-}
-
-function showExpModal(exp) {
-  document.getElementById('exp-modal-title').textContent = exp ? '编辑经验' : '添加经验';
-  document.getElementById('exp-id').value = '';
-  document.getElementById('exp-module').value = '';
-  document.getElementById('exp-module').readOnly = false;
-  document.getElementById('exp-keywords').value = '';
-  document.getElementById('exp-log-paths').value = '';
-  document.getElementById('exp-tool-usage').value = '';
-  document.getElementById('exp-scene').value = '';
-  document.getElementById('exp-log-samples').value = '';
-  document.getElementById('exp-code-snippets').value = '';
-  document.getElementById('exp-submit-btn').classList.remove('hidden');
-  document.getElementById('exp-modal').classList.remove('hidden');
-}
-
-function closeExpModal() {
-  document.getElementById('exp-modal').classList.add('hidden');
-}
-
-async function submitExp() {
-  const module = document.getElementById('exp-module').value.trim();
-  if (!module) { alert('请输入模块名'); return; }
-  await fetch(API + '/api/experiences', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      module,
-      keywords: document.getElementById('exp-keywords').value,
-      log_paths: document.getElementById('exp-log-paths').value,
-      tool_usage: document.getElementById('exp-tool-usage').value,
-      scene: document.getElementById('exp-scene').value,
-      log_samples: document.getElementById('exp-log-samples').value,
-      code_snippets: document.getElementById('exp-code-snippets').value
-    })
-  });
-  closeExpModal();
-  loadExps();
-}
-
-async function deleteExp(id) {
-  if (!confirm('确认删除这条经验？')) return;
-  await fetch(API + '/api/experiences/' + id, {method: 'DELETE'});
-  loadExps();
-}
-
-// Helpers
-async function fetchJSON(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-function statusTag(status) {
-  const labels = {pending: '待认领', in_progress: '进行中', archived: '已完成', exception: '异常'};
-  return `<span class="status-pill status-${status}">${labels[status] || status}</span>`;
-}
-
-function fmt(ts) {
-  if (!ts) return '-';
-  const d = new Date(ts);
-  return d.toLocaleDateString('zh-CN', {year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'});
-}
-
-function esc(s) {
-  if (!s) return '';
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function debounce(fn, ms) {
-  let t;
-  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
-}
-
-// Terminal (xterm.js)
-let term;
-let ws;
-let termReady = false;
-
-function initTerminal() {
-  if (term) return;
-  term = new Terminal({
-    fontFamily: "'SF Mono', 'Fira Code', 'Consolas', monospace",
-    fontSize: 13,
-    theme: { background: '#0f172a', foreground: '#e2e8f0', cursor: '#22d3ee' },
-    cursorBlink: true,
-    scrollback: 10000,
-  });
-  term.open(document.getElementById('terminal'));
-
-  ws = new WebSocket('ws://' + window.location.host + '/api/pty');
-  ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { termReady = true; term.writeln('\x1b[32mSkill Factory AI Terminal\x1b[0m\r\nType your request in natural language, e.g. "帮我添加一条 redis-cluster 经验"\r\n'); };
-  ws.ondata = (e) => {
-    if (termReady) term.write(new Uint8Array(e.data));
-  };
-  ws.onclose = () => { term.writeln('\r\n\x1b[33mConnection closed. Refresh to reconnect.\x1b[0m'); termReady = false; };
-  ws.onerror = (e) => { term.writeln('\r\n\x1b[31mWebSocket error\x1b[0m'); };
-  term.onData(data => { if (ws && ws.readyState === 1) ws.send(data); });
-  term.onResize(() => {
-    if (ws && ws.readyState === 1) {
-      ws.send('resize,' + term.cols + ',' + term.rows);
-    }
-  });
-}
+// 首次加载：dashboard 主体 + widget 侧栏（链接/目录/todo 常驻）
+loadLinks();
+loadDirs();
+loadTodo();
+loadDashboard();
 </script>
 </body>
 </html>

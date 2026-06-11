@@ -1,176 +1,166 @@
-# Skill 自动化工厂 — 方案设计文档
+# skill-factory v2 — All-in-One 个人工作台
 
-## 一、需求分析
+> v2 = skill-factory（v1 Go 单体）+ ai-task-system v2.4（Python 调度/执行）+ 5 个新功能（链接/目录/todo/定时/AI 任务）
+> 单 Go 二进制 / 9 张表 / 30+ API / 跨 macOS·Linux·Windows
 
-### 背景与目标
+## 1. 演进背景
 
-搭建标准化、可复用、可沉淀、可自动迭代的**业务问题定位 Skill 开发工厂**，统一 Skill 定义、开发、验证、沉淀、复用全流程。核心目标：**用 Skill 生产 Skill** 的自动化闭环。
+| 阶段 | 形态 | 短板 |
+|---|---|---|
+| **v1** | skill-factory：Go 单体 + 经验库 + PTY + 5 Tab | 无调度器、无任务执行引擎、无超时重试 |
+| **v2.4 旧** | ai-task-system：Python FastAPI + 调度器 + AI CLI | 无经验库、无 TDD 验收、PTY 缺失、无定时触发 |
 
-### 系统角色
+**v2 目标**：单 Go 二进制，融合两边强项 + 加 5 个新功能，做日常 homepage/launcher。
 
-| 角色 | 职责 |
-|------|------|
-| 平台管理员 | 创建任务、完善经验库、审核结果 |
-| 后台管理系统 | 任务管理、经验库、API 输出 |
-| Factory Skill | 自动拉取任务、TDD 开发、多轮迭代验收 |
-| Redis 集群 Skill（示例业务） | 业务定位能力，作为工厂产出物 |
+## 2. 实施历程
 
----
+| Phase | 工作量 | 关键产出 |
+|---|---|---|
+| Phase 1 | 1-3 天 | 9 张表 + 字段迁移（PRAGMA user_version=2） |
+| Phase 2 | 4-6 天 | executor 包（BuildCommand / Run 流式 / 4 种确认信号）+ hub + ExecutionRepo + 任务执行 API |
+| Phase 3 | 7-10 天 | 5 个新 repo + shortcuts + todo + scheduler + 25 handler + 5 widget + 4 form modal |
+| Phase 4 | 11-12 天 | pty build tag 隔离（pty_unix/pty_windows）+ 跨三平台编译 |
+| Phase 5 | 13 天 | 文档 |
 
-## 二、系统架构
+## 3. 数据模型（9 张表）
 
-### 后台管理系统（Go + SQLite）
+`./data/skill-factory.db`（SQLite，无 CGO 跨平台）
 
-**数据模型**：
+| 表 | 来源 | 用途 |
+|---|---|---|
+| **tasks** | v1 + v2.4 合并 | 任务（24 字段：title/description/status/priority/started_at/executor_model/last_heartbeat...） |
+| **experiences** | v1 | 经验库（模块/关键词/日志路径/工具/场景/样例/代码片段） |
+| **skill_versions** | v1 | 任务迭代产生的 Skill 版本（accuracy/iter_count） |
+| **executions** | v2.4 | 一次执行的 stdout/stderr/exit_code/command/source |
+| **evaluations** | v2.4 | LLM 打分（0-10 + comments） |
+| **web_links** | 新功能 1 | 主页快捷链接 |
+| **dir_shortcuts** | 新功能 2 | 目录快捷（点击调系统资源管理器） |
+| **scheduled_tasks** | 新功能 3+5 | 定时任务（cron / @every） |
+| **app_settings** | 新功能 4 | KV（todo_md_path / default_model / timezone） |
+| **app_meta** | 通用 | KV（user_version 等） |
 
-```sql
-CREATE TABLE tasks (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    description TEXT,
-    status TEXT DEFAULT 'pending',
-    experience_id TEXT,
-    resources TEXT,
-    acceptance TEXT,
-    version TEXT DEFAULT 'v0.0.1',
-    created_at DATETIME,
-    claimed_at DATETIME,
-    maintainer TEXT,
-    repo_address TEXT,
-    archived_at DATETIME,
-    result TEXT
-);
+字段迁移：`InitSchema` 内 `migrateTasksColumns` 用 `PRAGMA table_info` 探测后 `ALTER TABLE ADD COLUMN`，旧 db 不丢数据。
 
-CREATE TABLE experiences (
-    id TEXT PRIMARY KEY,
-    module TEXT NOT NULL,
-    keywords TEXT,
-    log_paths TEXT,
-    tool_usage TEXT,
-    scene TEXT,
-    log_samples TEXT,
-    code_snippets TEXT,
-    version TEXT,
-    created_at DATETIME,
-    updated_at DATETIME
-);
-```
-
-**API 接口**：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/tasks | 查询任务列表（支持状态过滤） |
-| POST | /api/tasks | 创建任务 |
-| GET | /api/tasks/:id | 获取任务详情 |
-| PUT | /api/tasks/:id/status | 更新任务状态 |
-| GET | /api/experiences | 查询经验库（支持模糊查询） |
-| POST | /api/experiences | 创建经验记录 |
-
-### 自动化工厂 Skill
-
-**运行流程**：
+## 4. 后端模块
 
 ```
-1. 初始化：调用 GET /api/tasks?status=pending 拉取待认领任务
-2. 任务认领：PUT /api/tasks/:id/status → in_progress
-3. 获取经验：GET /api/experiences/:module 获取前置知识
-4. TDD 开发（最多 20 轮）：
-   a. 写测试用例
-   b. 实现 Skill
-   c. 运行测试，收集结果
-   d. 准确率达标？用例全覆盖？无误判漏判？
-      - 是 → 进入步骤 5
-      - 否 → 迭代回到 4a
-5. 上传产物，更新任务状态为 archived
-6. 达到 20 轮未达标 → status=exception
+internal/
+  backend/      models + InitSchema + 8 个 repo（Task/Experience/Execution/Evaluation/WebLink/DirShortcut/Scheduled/AppSettings）
+  executor/     Run(ctx, cmd, onChunk) 流式 + 超时
+  executor/runner/  BuildCommand(typ, model, session, prompt)  // claude/cbc/shell
+  executor/confirm.go  NeedsUserInput + ParseConfirmRequest  // 4 种信号
+  hub/          WebSocket 广播中心
+  wsmsg/        6 频道常量 + Message struct
+  scheduler/    robfig/cron 包装 + Reload/Start/Stop/RunNow
+  shortcuts/    OpenDir 跨平台（darwin/linux/windows）
+  todo/         Parse + ReadAndParse + ToggleAndWrite
 ```
 
-**验收标准**：
+### 4.1 CLI 命令构造（移植 cli_executor.py:26-56）
 
-| 维度 | 要求 |
-|------|------|
-| 准确率 | 正向用例全部通过（pass_rate = 1.0） |
-| 误判（false_pos） | 0 |
-| 漏判（false_neg） | 0 |
-| 迭代上限 | 20 轮 |
-
----
-
-## 三、Redis 分布式集群 Skill（示例业务）
-
-### 前置经验库（Redis 模块）
-
-```yaml
-module: redis-cluster
-keywords:
-  - "CLUSTERDOWN"
-  - "MOVED/ASK redirect"
-  - "READONLY"
-  - "slowlog"
-  - "mem_fragmentation_ratio"
-log_paths:
-  - /var/log/redis/redis-server.log
-tools:
-  - redis-cli cluster nodes
-  - redis-cli slowlog get 10
-  - redis-cli --bigkeys
-  - redis-cli memory stats
-scenes:
-  - 集群节点失联定位
-  - 内存异常增长分析
-  - 慢查询根因排查
+```go
+BuildCommand(typ, model, sessionID, prompt) ([]string, error)
+// claude: claude --print --verbose [--model ...] [--session-id ...] "<prompt>"
+// cbc:    cbc -p [--model ...] "<prompt>"  // PATH 中无 cbc 时回落 codebuddy
+// shell:  sh -c "<prompt>"
 ```
 
-### 验收样例
+### 4.2 4 种人工确认信号（移植 cli_executor.py:62-115）
 
-**正向用例**：
+`NeedsUserInput` 检测 18 个中英文信号（`?`/`[Y/n]`/`请确认`/`是否要`/`Continue?`...），`ParseConfirmRequest` 正则提取 `{confirm_type:...}`。
 
-| 输入 | 预期输出 |
-|------|---------|
-| `CLUSTERDOWN The cluster is gone` | 定位 cluster-node-timeout，给出 redis.conf 调优建议 |
-| `READONLY You can't write` | 识别只读场景，输出 replica 配置检查步骤 |
-| slowlog 显示 > 5s 的 KEYS 命令 | 给出 SCAN 替换方案 |
-| `mem_fragmentation_ratio > 1.5` | 给出 MEMORY PURGE + activedefrag 配置 |
+### 4.3 调度器
 
-**反向用例（脏数据）**：
+`robfig/cron/v3` 跨平台（不依赖 OS scheduler），`Reload` 重建 cron 引擎从 DB 加载 enabled=1 任务，每次触发写 `executions`（source='scheduled'）并通过 `wsmsg.ChannelScheduled` 推 WS。
 
-| 输入 | 预期行为 |
-|------|---------|
-| 空 slowlog 输出 | 跳过分析，返回"无慢查询记录" |
-| 非 Redis 日志 | 明确拒绝，输出"非 Redis 日志格式" |
-| 二进制日志内容 | 友好提示"请提供文本日志" |
+## 5. API（30+ 端点）
 
----
+```
+GET    /api/tasks              支持 status/offset/limit 过滤
+POST   /api/tasks
+GET    /api/tasks/{id}
+PUT    /api/tasks/{id}/status
+POST   /api/tasks/{id}/run                 // 立即执行（command_type+prompt from body or task）
+POST   /api/tasks/{id}/cancel              // kill 子进程
+GET    /api/tasks/{id}/executions
+GET    /api/executions                      // 最近 50 条
+GET    /api/experiences                     // 支持 module 模糊
+POST   /api/experiences
+GET    /api/experiences/{id}
+GET    /api/stats
+GET    /api/pty                             // macOS/Linux 真 PTY，Windows 503
+GET    /ws                                  // WebSocket 升级
 
-## 四、目录结构
+# 5 个新功能
+GET/POST/PUT/DELETE  /api/web-links[/{id}]
+GET/POST/PUT/DELETE  /api/dir-shortcuts[/{id}]
+POST                 /api/dir-shortcuts/{id}/open    // 跨平台 OpenDir
+GET/POST/GET/PUT/DELETE/POST  /api/scheduled[/{id}]   // 含 /run-now
+POST/POST/GET/POST  /api/scheduler/{start,stop,status,reload}
+GET/PUT/PUT/GET      /api/todo[/{line_no}/path]      // toggle 走 URL line_no
+GET/PUT              /api/settings[/{key}]
+```
+
+WS 6 频道：`scheduler / task / exec / scheduled / shortcut / todo`
+
+## 6. 前端（embed.FS 嵌入单 HTML）
+
+- 5 Tab：Dashboard / Tasks / Experiences / Automation / AI Chat
+- **Dashboard Tab** 追加 12 列 widget grid（5 widget：链接 / 目录 / todo / scheduler 徽章+启停 / 最近 executions）
+- **Automation Tab** 完整重写：scheduler 启停按钮 + 定时任务表（CRUD + ▶ 立即跑）+ 最近 executions 列表
+- 4 个 form modal（link/dir/todo-path/scheduled）替代原 prompt()
+- `gorilla/websocket` 客户端 6 频道分发
+- xterm.js 终端（macOS/Linux）
+
+## 7. 跨平台
+
+| 平台 | 编译命令 | 二进制 | 备注 |
+|---|---|---|---|
+| macOS | `go build` | 15.0 MB | 真 PTY |
+| Linux | `GOOS=linux go build` | 15.5 MB | 真 PTY |
+| Windows | `GOOS=windows go build` | 15.9 MB | PTY stub（返回 503） |
+
+`creack/pty` 通过 `//go:build !windows` 隔离；`internal/shortcuts/open.go` 用 `runtime.GOOS` 切 `open`/`xdg-open`/`explorer`；调度器和 executor 走 `os/exec` 天然跨平台（Windows 自动用 `TerminateProcess`）。
+
+## 8. 验收
+
+- `go test ./...` 6 包全通过（executor / runner / shortcuts / todo / experience / task）
+- 三平台 `go build` 全 exit=0
+- 端到端：创建链接 + 调度器启动 + `@every 5s` 定时任务 → 7s 内触发 N 次 → executions 表 source=scheduled + last_status=success
+- 6 份 db 备份保留在 `data/`（v1 → v2 fresh → phase2/3/3-ui/4-modal）
+
+## 9. 仍欠
+
+- evaluator LLM 打分（plan § 10 标注 v0.1 不做）
+- `/api/tasks/{id}/submit-input`（人工确认输入，detect 已就位，路由未加）
+- Windows Service 注册（`kardianos/service`，可后续补）
+
+## 10. 目录结构
 
 ```
 skill-factory/
-  cmd/server/
-    main.go          # HTTP 服务入口
-    index.html       # 内嵌 Web UI
-  internal/
-    backend/
-      models.go      # 数据模型
-      repo.go        # Repo 层（Task / Experience）
-      server.go      # DB 初始化
-      sqlite.go      # sqlite driver import
-    task/            # TaskRepo TDD 测试
-    experience/       # ExperienceRepo TDD 测试
-  go.mod
-  DESIGN.md
-
-skills/
-  redis-cluster-troubleshoot/  # 示例产出物
-  skill-factory/               # Factory Skill
+├── cmd/server/
+│   ├── main.go            HTTP 入口（30+ 路由 + 装配 9 个 repo）
+│   ├── pty.go             PTY Unix 实现（//go:build !windows）
+│   ├── pty_windows.go     PTY Windows stub（503）
+│   └── index.html         45 KB 单页 SPA（5 Tab + 5 widget + 4 modal）
+├── internal/
+│   ├── backend/           models.go + repo.go（9 张表 + 8 repo + InitSchema + 迁移）
+│   ├── executor/          exec.go + confirm.go + executor_test.go
+│   ├── executor/runner/   build.go + runner_test.go
+│   ├── hub/               hub.go
+│   ├── wsmsg/             types.go
+│   ├── scheduler/         scheduler.go
+│   ├── shortcuts/         open.go + open_test.go
+│   ├── todo/              parser.go + parser_test.go
+│   ├── task/              task_test.go
+│   └── experience/        experience_test.go
+├── docs/
+│   ├── CLI.md             claude / cbc / shell 命令格式
+│   ├── MIGRATION.md       v1 → v2 迁移指南
+│   └── SCHEDULER.md       cron 语法 + 跨平台
+├── data/                  SQLite + 6 份备份
+├── go.mod
+├── DESIGN.md              本文档
+└── README.md              启动 + 5 功能 demo
 ```
-
----
-
-## 五、核心价值
-
-1. **统一范式**：所有 Skill 开发遵循 4 项标准输入 + 验收闭环
-2. **经验沉淀**：可查询、可导出、可团队复用
-3. **自动化闭环**：TDD 迭代、量化验收、工业化自迭代生产
-4. **职责清晰**：极简入参框架，剥离冗余环境配置

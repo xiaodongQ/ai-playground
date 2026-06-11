@@ -17,16 +17,27 @@ type Task struct {
 	Title        string     `json:"title"`
 	Description  string     `json:"description,omitempty"`
 	Status       string     `json:"status"`
+	Priority     int        `json:"priority,omitempty"`
 	ExperienceID string     `json:"experience_id,omitempty"`
 	Resources    string     `json:"resources,omitempty"`
 	Acceptance   string     `json:"acceptance,omitempty"`
 	Version      string     `json:"version"`
 	CreatedAt    time.Time  `json:"created_at"`
 	ClaimedAt    *time.Time `json:"claimed_at,omitempty"`
+	StartedAt    *time.Time `json:"started_at,omitempty"`
+	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 	Maintainer   string     `json:"maintainer,omitempty"`
 	RepoAddress  string     `json:"repo_address,omitempty"`
 	ArchivedAt   *time.Time `json:"archived_at,omitempty"`
 	Result       string     `json:"result,omitempty"`
+	// 调度相关
+	ExecutorModel       string  `json:"executor_model,omitempty"`
+	CbcModel            string  `json:"cbc_model,omitempty"`
+	IterationCount      int     `json:"iteration_count,omitempty"`
+	MaxIterations       int     `json:"max_iterations,omitempty"`
+	ImprovementThreshold float64 `json:"improvement_threshold,omitempty"`
+	LastHeartbeat       *time.Time `json:"last_heartbeat,omitempty"`
+	LastError           string  `json:"last_error,omitempty"`
 }
 
 type Experience struct {
@@ -67,4 +78,74 @@ type TaskResult struct {
 	PassCount  int     `json:"pass_count"`
 	FailCount  int     `json:"fail_count"`
 	Message    string `json:"message,omitempty"`
+}
+
+// ===== v2 all-in-one 新增模型 =====
+
+// Execution 任务执行记录（一次执行 = 一次子进程跑）
+type Execution struct {
+	ID             string     `json:"id"`
+	TaskID         string     `json:"task_id,omitempty"`
+	ScheduledTaskID string    `json:"scheduled_task_id,omitempty"`
+	Source         string     `json:"source"` // 'manual' | 'scheduled' | 'retry'
+	Command        string     `json:"command"`
+	Model          string     `json:"model,omitempty"`
+	StartedAt      time.Time  `json:"started_at"`
+	CompletedAt    *time.Time `json:"completed_at,omitempty"`
+	Output         string     `json:"output,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	ExitCode       int        `json:"exit_code"`
+}
+
+type Evaluation struct {
+	ID             string    `json:"id"`
+	TaskID         string    `json:"task_id,omitempty"`
+	ExecutionID    string    `json:"execution_id,omitempty"`
+	EvaluatorModel string    `json:"evaluator_model,omitempty"`
+	Score          float64   `json:"score"`
+	Comments       string    `json:"comments,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// WebLink 网页链接
+type WebLink struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	URL       string    `json:"url"`
+	IconURL   string    `json:"icon_url,omitempty"`
+	SortOrder int       `json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// DirShortcut 目录快捷
+type DirShortcut struct {
+	ID            string     `json:"id"`
+	Name          string     `json:"name"`
+	Path          string     `json:"path"`
+	SortOrder     int        `json:"sort_order"`
+	CreatedAt     time.Time  `json:"created_at"`
+	LastAccessedAt *time.Time `json:"last_accessed_at,omitempty"`
+}
+
+// ScheduledTask 定时任务
+type ScheduledTask struct {
+	ID             string     `json:"id"`
+	Name           string     `json:"name"`
+	CronExpr       string     `json:"cron_expr"`
+	CommandType    string     `json:"command_type"` // 'claude' | 'cbc' | 'shell'
+	Model          string     `json:"model,omitempty"`
+	Prompt         string     `json:"prompt,omitempty"`
+	WorkingDir     string     `json:"working_dir,omitempty"`
+	Enabled        bool       `json:"enabled"`
+	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
+	LastStatus     string     `json:"last_status,omitempty"`
+	LastExecutionID string    `json:"last_execution_id,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+// AppSetting KV 设置
+type AppSetting struct {
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
