@@ -36,19 +36,15 @@
     <div class="nav-item" data-tab="aichat" onclick="switchTab('aichat')" data-tooltip="AI 对话&#10;终端式 Claude Code 交互（PTY）&#10;macOS / Linux 实时">
       <span class="nav-icon">🤖</span><span class="nav-text">AI 对话</span>
     </div>
-  </nav>
-
-  <!-- 目录 widget（紧贴 AI 对话 nav 下面，常驻） -->
-  <div class="sidebar-todo">
-    <div class="todo-head">
-      <span class="todo-head-icon">📂</span>
-      <span class="todo-head-text">目录</span>
-      <span class="todo-head-actions">
-        <button class="btn btn-small" onclick="showDirModal()" title="添加">+</button>
-      </span>
+    <!-- 目录区（紧邻 AI 对话，带抬头 + 轻框区分） -->
+    <div class="dir-section">
+      <div class="dir-section-head">
+        <span>📂 目录</span>
+        <button class="btn btn-small" onclick="showDirModal()" title="添加目录">+</button>
+      </div>
+      <div id="dir-list" class="dir-list"></div>
     </div>
-    <div id="dir-list" class="dir-list"><div style="color:var(--text-secondary);font-size:12px;padding:4px">暂无目录</div></div>
-  </div>
+  </nav>
 
   <div class="sidebar-footer">
     <div class="nav-item theme-btn" id="theme-btn" onclick="toggleTheme()">
@@ -58,7 +54,7 @@
 </aside>
 
 <!-- Widget Sidebar：链接 + 待办 上下排列 -->
-<aside class="widget-sidebar">
+<aside class="widget-sidebar" id="widget-sidebar">
   <div class="widget">
     <div class="widget-title">
       <span>🔗 快捷链接</span>
@@ -77,6 +73,9 @@
     <div id="todo-list" class="todo-list"><div style="color:var(--text-secondary);font-size:12px;padding:4px">未配置 todo.md 路径</div></div>
   </div>
 </aside>
+
+<!-- 列宽拖拽 handle（widget-sidebar 与 main 之间） -->
+<div class="resize-handle" id="resize-handle" title="拖拽调宽"></div>
 
 <!-- Main Content -->
 <main class="main">
@@ -102,18 +101,7 @@
       </div>
     </div>
 
-    <div class="chart-section">
-      <div class="chart-title">任务趋势（近7日）</div>
-      <div class="chart-bars" id="chart-bars"></div>
-    </div>
-
-    <div class="section-header">
-      <div class="section-title">最新任务</div>
-      <button class="btn btn-primary btn-small" onclick="showTaskModal()">+ 新建任务</button>
-    </div>
-    <div id="recent-list"></div>
-
-    <!-- 总览 Tab 顶部 2 列：调度器 + 最近执行（待办已移到 sidebar） -->
+    <!-- 总览 Tab 顶部 2 列：调度器 + 最近执行（关键 widget 提前到 stats 之后） -->
     <div class="dashboard-row">
       <div class="widget" id="dash-sched-widget">
         <div class="widget-title">
@@ -134,6 +122,17 @@
         </div>
         <div id="recent-execs" style="max-height:280px;overflow-y:auto"></div>
       </div>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">最新任务</div>
+      <button class="btn btn-primary btn-small" onclick="showTaskModal()">+ 新建任务</button>
+    </div>
+    <div id="recent-list" style="max-height:320px;overflow-y:auto"></div>
+
+    <div class="chart-section">
+      <div class="chart-title">任务趋势（近7日）</div>
+      <div class="chart-bars" id="chart-bars"></div>
     </div>
   </div>
 
@@ -402,6 +401,44 @@ loadLinks();
 loadDirs();
 loadTodo();
 loadDashboard();
+
+// 恢复上次停留的 tab（必须在所有 view JS 加载完之后，否则 switchTab 内的 loadTasks/loadExps 等都是 undefined）
+(function restoreTab() {
+  const saved = localStorage.getItem('sf-current-tab');
+  if (saved && saved !== 'dashboard' && document.getElementById('page-' + saved)) {
+    switchTab(saved);
+  }
+})();
+
+// 列宽拖拽：拖 widget-sidebar 与 main 之间的 4px 把手
+(function initResize() {
+  const handle = document.getElementById('resize-handle');
+  const sidebar = document.getElementById('widget-sidebar');
+  if (!handle || !sidebar) return;
+  const saved = parseInt(localStorage.getItem('sf-widget-sidebar-w'), 10);
+  if (saved && saved >= 220 && saved <= 700) sidebar.style.width = saved + 'px';
+  let startX = null, startW = 0;
+  handle.addEventListener('mousedown', e => {
+    startX = e.clientX;
+    startW = sidebar.offsetWidth;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', e => {
+    if (startX == null) return;
+    const dx = e.clientX - startX;
+    const newW = Math.max(220, Math.min(700, startW + dx));
+    sidebar.style.width = newW + 'px';
+  });
+  document.addEventListener('mouseup', () => {
+    if (startX == null) return;
+    startX = null;
+    handle.classList.remove('dragging');
+    document.body.style.cursor = '';
+    localStorage.setItem('sf-widget-sidebar-w', sidebar.offsetWidth);
+  });
+})();
 </script>
 </body>
 </html>
