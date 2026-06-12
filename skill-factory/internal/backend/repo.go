@@ -206,6 +206,20 @@ func (r *TaskRepo) Get(id string) (*Task, error) {
 	return &t, err
 }
 
+// Delete 硬删 task（包括关联的 executions / evaluations）。不可恢复，请前端先 confirm。
+func (r *TaskRepo) Delete(id string) error {
+	if _, err := r.db.Exec(`DELETE FROM executions WHERE task_id=?`, id); err != nil {
+		return fmt.Errorf("delete executions: %w", err)
+	}
+	if _, err := r.db.Exec(`DELETE FROM evaluations WHERE task_id=?`, id); err != nil {
+		return fmt.Errorf("delete evaluations: %w", err)
+	}
+	if _, err := r.db.Exec(`DELETE FROM tasks WHERE id=?`, id); err != nil {
+		return fmt.Errorf("delete task: %w", err)
+	}
+	return nil
+}
+
 func (r *TaskRepo) UpdateStatus(id, status, maintainer string) error {
 	now := time.Now()
 	switch status {

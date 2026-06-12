@@ -152,21 +152,25 @@ function taskOpsByStatus(t) {
       return `
         <button class="btn btn-warning btn-small" onclick="claimTask('${id}')" title="认领后：状态→in_progress，maintainer 标记为你，可以▶运行">🟡 认领</button>
         <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')" title="直接归档（不需执行）">归档</button>
+        <button class="btn btn-danger btn-small" onclick="deleteTask('${id}', '${esc(t.title)}')" title="硬删任务及其所有 executions / evaluations（不可恢复）" style="background:#dc2626">🗑 删除</button>
       `;
     case 'in_progress':
       return `
         <button class="btn btn-primary btn-small" onclick="runTask('${id}')" title="立即用 AI CLI 跑这个任务（流式输出在 /api/tasks/{id}/run）">▶ 运行</button>
         <button class="btn btn-small" onclick="unclaimTask('${id}')" title="退回 pending（清空 maintainer/started_at）" style="background:#94a3b8;color:#fff">↩ 取消认领</button>
         <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')">归档</button>
+        <button class="btn btn-danger btn-small" onclick="deleteTask('${id}', '${esc(t.title)}')" title="硬删任务及其所有 executions / evaluations（不可恢复）" style="background:#dc2626">🗑 删除</button>
       `;
     case 'archived':
       return `
         <button class="btn btn-small" onclick="reopenTask('${id}')" title="归档→重新打开回到 pending">↻ 重新打开</button>
+        <button class="btn btn-danger btn-small" onclick="deleteTask('${id}', '${esc(t.title)}')" title="硬删任务及其所有 executions / evaluations（不可恢复）" style="background:#dc2626">🗑 删除</button>
       `;
     case 'exception':
       return `
         <button class="btn btn-warning btn-small" onclick="reopenTask('${id}')" title="异常→重新打开回到 pending">↻ 重新打开</button>
         <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')">归档</button>
+        <button class="btn btn-danger btn-small" onclick="deleteTask('${id}', '${esc(t.title)}')" title="硬删任务及其所有 executions / evaluations（不可恢复）" style="background:#dc2626">🗑 删除</button>
       `;
     default:
       return `<button class="btn btn-secondary btn-small" onclick="viewTask('${id}')">详情</button>`;
@@ -256,6 +260,19 @@ async function archiveTask(id) {
     body: JSON.stringify({status: 'archived'})
   });
   reloadCurrentTab();
+}
+
+// deleteTask 硬删 task + 关联 executions / evaluations（不可恢复）
+async function deleteTask(id, title) {
+  if (!confirm(`⚠️ 确认硬删任务？\n\n任务: ${title}\n\n将同时删除所有 execution 和 evaluation 记录。\n此操作不可恢复！`)) return;
+  try {
+    const r = await fetchJSON(API + '/api/tasks/' + id, {method: 'DELETE'});
+    if (r.status === 'deleted') {
+      reloadCurrentTab();
+    }
+  } catch (e) {
+    alert('删除失败：' + e.message);
+  }
 }
 
 function viewTask(id) {

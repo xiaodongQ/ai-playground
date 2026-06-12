@@ -73,6 +73,7 @@ func (s *APIServer) routes() {
 	mux.HandleFunc("POST /api/tasks/{id}/unclaim", s.handleTaskUnclaim)
 	mux.HandleFunc("POST /api/tasks/{id}/run", s.handleTaskRun)
 	mux.HandleFunc("POST /api/tasks/{id}/cancel", s.handleTaskCancel)
+	mux.HandleFunc("DELETE /api/tasks/{id}", s.handleTaskDelete)
 	mux.HandleFunc("GET /api/tasks/{id}/executions", s.handleTaskExecutions)
 	mux.HandleFunc("GET /api/executions", s.handleExecutionsRecent)
 	mux.HandleFunc("GET /api/executions/{id}", s.handleExecutionGet)
@@ -423,6 +424,16 @@ func (s *APIServer) handleTaskCancel(w http.ResponseWriter, r *http.Request) {
 	}
 	cancel()
 	writeJSON(w, map[string]any{"task_id": id, "cancelled": true})
+}
+
+// handleTaskDelete 硬删 task + 关联 executions + evaluations（不可恢复）。
+func (s *APIServer) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.db.Delete(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"id": id, "status": "deleted"})
 }
 
 func (s *APIServer) handleTaskExecutions(w http.ResponseWriter, r *http.Request) {
