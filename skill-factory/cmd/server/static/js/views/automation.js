@@ -82,8 +82,11 @@ function deleteScheduled(id) {
 
 let recentExecLimit = 10;
 async function loadRecentExecutions() {
-  const list = await fetchJSON('/api/executions?limit=' + recentExecLimit);
-  const render = (target) => {
+  const render = (target, list, errMsg) => {
+    if (errMsg) {
+      target.innerHTML = `<div style="padding:8px;color:var(--exception);font-size:12px">⚠ ${errMsg} <button class="btn btn-small" style="margin-left:8px" onclick="loadRecentExecutions()">重试</button></div>`;
+      return;
+    }
     if (!list || list.length === 0) {
       target.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;padding:8px">暂无执行</div>'
         + `<div style="padding:8px;text-align:center"><button class="btn btn-small" onclick="loadMoreExecutions()">📥 加载更多 (尝试加载 ${recentExecLimit} 条)</button></div>`;
@@ -109,8 +112,15 @@ async function loadRecentExecutions() {
   };
   const el = document.getElementById('recent-execs');
   const el2 = document.getElementById('exec-list');
-  if (el) render(el);
-  if (el2) render(el2);
+  let list, errMsg;
+  try {
+    list = await fetchJSON('/api/executions?limit=' + recentExecLimit);
+  } catch (e) {
+    console.error('[loadRecentExecutions]', e);
+    errMsg = '加载失败：' + (e.message || e);
+  }
+  if (el) render(el, list, errMsg);
+  if (el2) render(el2, list, errMsg);
 }
 
 function loadMoreExecutions() {
