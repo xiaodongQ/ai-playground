@@ -4,9 +4,11 @@ package executor
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Result 一次执行的完整结果。
@@ -33,9 +35,14 @@ func Run(ctx context.Context, cmd []string, onChunk func(string)) (*Result, erro
 	if err != nil {
 		return nil, err
 	}
+	started := time.Now()
 	if err := c.Start(); err != nil {
 		return nil, err
 	}
+	slog.Debug("executor: process started",
+		slog.String("cmd", strings.Join(cmd, " ")),
+		slog.Int("pid", c.Process.Pid),
+	)
 
 	var out, errBuf strings.Builder
 	var wg sync.WaitGroup
@@ -92,5 +99,24 @@ func Run(ctx context.Context, cmd []string, onChunk func(string)) (*Result, erro
 		// ctx 超时返回的 error 带 "signal: killed"
 		res.Err = waitErr
 	}
+	lvl := slog.LevelInfo
+	if exit != 0 || waitErr != nil {
+		lvl = slog.LevelError
+	}
+	slog.LogAttrs(context.Background(), lvl, "executor: process exited",
+		slog.String("cmd", strings.Join(cmd, " ")),
+		slog.Int("exit_code", exit),
+		slog.Int64("dur_ms", time.Since(started).Milliseconds()),
+		slog.String("err", errStr(waitErr)),
+		slog.Int("stdout_bytes", len(res.Output)),
+		slog.Int("stderr_bytes", len(res.ErrorOut)),
+	)
 	return res, nil
+}
+
+func errStr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

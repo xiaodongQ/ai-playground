@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"skill-factory/internal/scheduler"
 	"skill-factory/internal/shortcuts"
 	"skill-factory/internal/todo"
+	"skill-factory/internal/httplog"
 	"skill-factory/internal/wsmsg"
 )
 
@@ -37,7 +39,8 @@ type APIServer struct {
 	evalDB *backend.EvaluationRepo
 	sch    *scheduler.Scheduler
 	hub    *hub.Hub
-	mux    *http.ServeMux
+	mux       *http.ServeMux
+	wrapped   http.Handler // mux + httplog.Middleware
 
 	// 进程内运行中的执行（task_id → cancel func）
 	mu      sync.Mutex
@@ -57,6 +60,7 @@ func NewAPIServer(
 		mux: http.NewServeMux(), running: map[string]context.CancelFunc{},
 	}
 	s.routes()
+	s.wrapped = httplog.Middleware(s.mux)
 	return s
 }
 
@@ -120,7 +124,7 @@ func (s *APIServer) routes() {
 }
 
 func (s *APIServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
+	s.wrapped.ServeHTTP(w, r)
 }
 
 // Tasks
@@ -321,18 +325,28 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.db.UpdateStatus(id, backend.TaskStatusInProgress, "factory-agent")
 
+	slog.Info("task run started",
+		slog.String("task_id", id),
+		slog.String("execution_id", exec.ID),
+		slog.String("command_type", req.CommandType),
+		slog.String("model", req.Model),
+		slog.Int("prompt_chars", len(req.Prompt)),
+		slog.String("cmd", exec.Command),
+	)
+
 	// 异步跑
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	s.mu.Lock()
 	s.running[id] = cancel
 	s.mu.Unlock()
 	go func() {
+		started := time.Now()
 		defer func() {
 			s.mu.Lock()
 			delete(s.running, id)
 			s.mu.Unlock()
 		}()
-		res, _ := executor.Run(ctx, cmd, func(chunk string) {
+		res, runErr := executor.Run(ctx, cmd, func(chunk string) {
 			s.hub.Broadcast(wsmsg.ChannelExec, map[string]any{
 				"execution_id": exec.ID,
 				"task_id":      id,
@@ -357,6 +371,18 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 			"done":         true,
 			"exit_code":    exitCode,
 		})
+		lvl := slog.LevelInfo
+		if exitCode != 0 || runErr != nil {
+			lvl = slog.LevelError
+		}
+		slog.LogAttrs(context.Background(), lvl, "task run finished",
+			slog.String("task_id", id),
+			slog.String("execution_id", exec.ID),
+			slog.Int("exit_code", exitCode),
+			slog.String("status", status),
+			slog.Int64("dur_ms", time.Since(started).Milliseconds()),
+			slog.String("err", errStr(runErr)),
+		)
 	}()
 
 	writeJSON(w, map[string]any{
@@ -994,6 +1020,13 @@ func parseInt(s string, def int) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
+}
+
+func errStr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func main() {

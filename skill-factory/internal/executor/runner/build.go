@@ -4,6 +4,7 @@ package runner
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 )
@@ -14,6 +15,11 @@ import (
 // cbc:      cbc -p [--model <m>] "<prompt>"   （PATH 中无 cbc 时回落到 codebuddy）
 // shell:    sh -c "<prompt>"
 func BuildCommand(typ, model, sessionID, prompt string) ([]string, error) {
+	slog.Debug("runner: BuildCommand",
+		slog.String("type", typ),
+		slog.String("model", model),
+		slog.Int("prompt_chars", len(prompt)),
+	)
 	switch typ {
 	case "claude":
 		cmd := []string{"claude", "--print", "--verbose"}
