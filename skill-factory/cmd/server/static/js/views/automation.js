@@ -96,12 +96,23 @@ async function loadRecentExecutions() {
     target.innerHTML = list.map(e => {
       const dt = new Date(e.started_at).toLocaleTimeString();
       const src = e.source === 'scheduled' ? '⏰' : '▶';
-      const ok = e.exit_code === 0;
+      const isRunning = !e.completed_at;
+      let statusIcon, statusColor, statusTitle;
+      if (isRunning) {
+        statusIcon = '⏳'; statusColor = 'var(--info,#3b82f6)';
+        statusTitle = '执行中…（尚未 Finish）';
+      } else if (e.exit_code === 0) {
+        statusIcon = '✓'; statusColor = 'var(--archived)';
+        statusTitle = 'exit_code=0';
+      } else {
+        statusIcon = '✗ ' + e.exit_code; statusColor = 'var(--exception)';
+        statusTitle = 'exit_code=' + e.exit_code;
+      }
       return `<div style="display:flex;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;align-items:center">
         <span title="${e.source}">${src}</span>
         <span style="color:var(--text-secondary);font-family:monospace">${dt}</span>
         <span style="flex:1;font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;text-decoration:underline dotted" onclick="viewExecutionDetail('${e.id}')" title="点击查看详情">${esc(e.command)}</span>
-        <span style="font-size:11px;color:${ok?'var(--archived)':'var(--exception)'}" title="exit_code=${e.exit_code}">${ok?'✓':('✗ '+e.exit_code)}</span>
+        <span style="font-size:11px;color:${statusColor}" title="${statusTitle}">${statusIcon}</span>
         <button class="btn btn-small" onclick="viewExecutionDetail('${e.id}')" title="查看详情">📋</button>
         <button class="btn btn-small" onclick="runEvaluation('${e.id}')" title="AI 评估 (调 claude 打分 0-10)">📊</button>
       </div>`;
@@ -142,12 +153,16 @@ async function viewExecutionDetail(id) {
     document.getElementById('exec-detail-cmd').value = exec.command || '';
     document.getElementById('exec-detail-output').value = exec.output || '(无输出)';
     document.getElementById('exec-detail-error').value = exec.error || '';
-    const ok = exec.exit_code === 0;
+    const isRunning = !exec.completed_at;
+    const ok = !isRunning && exec.exit_code === 0;
     const dur = exec.completed_at && exec.started_at
       ? Math.round((new Date(exec.completed_at) - new Date(exec.started_at)) / 100) / 10 + 's'
-      : '-';
+      : '⏳ 进行中…';
+    const exitDisplay = isRunning
+      ? '<b style="color:var(--info,#3b82f6)">运行中</b>'
+      : `<b style="color:${ok?'var(--archived)':'var(--exception)'}">${exec.exit_code}</b>`;
     document.getElementById('exec-detail-meta').innerHTML =
-      `<b>${esc(exec.source)}</b> · exit_code=<b style="color:${ok?'var(--archived)':'var(--exception)'}">${exec.exit_code}</b> · ${esc(new Date(exec.started_at).toLocaleString())} · 耗时 ${dur}`;
+      `<b>${esc(exec.source)}</b> · exit_code=${exitDisplay} · ${esc(new Date(exec.started_at).toLocaleString())} · 耗时 ${dur}`;
     document.getElementById('exec-detail-eval').innerHTML = '<span style="color:var(--text-secondary);font-size:12px">评估中？点下方"📊 AI 评估"按钮调 LLM 给这次执行打分</span>';
     // 拉已有评估
     try {
