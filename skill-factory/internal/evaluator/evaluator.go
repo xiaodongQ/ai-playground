@@ -16,10 +16,13 @@ import (
 	"skill-factory/internal/executor/runner"
 )
 
-// 评分 prompt：要求 claude 输出 "评分: X/10" + "评语: ..."
-const evalPromptTpl = `你是一个严格的 AI 任务结果评估员。请基于任务的"原始指令"和"实际输出"判断任务是否真正完成。
+// 评分 prompt：要求 claude 基于"指令 vs AI 自报动作清单 vs 实际 stdout"三方对照打分。
+const evalPromptTpl = `你是一个严格的 AI 任务结果评估员。请基于"原始指令"、"AI 自报的动作清单"和"实际 stdout"三方对照，判断任务是否真正完成。
 
 ## 任务原始指令
+%s
+
+## AI 自报的动作清单（从任务输出末尾提取）
 %s
 
 ## 任务实际输出（stdout，截断前 3000 字符）
@@ -32,18 +35,19 @@ const evalPromptTpl = `你是一个严格的 AI 任务结果评估员。请基�
 %d
 
 ## 评估要求
-1. 仔细比对"指令"和"输出"，判断任务是否真的完成了要求
-2. 如果有错误输出，要考虑是否影响结果
-3. 输出严格按以下 2 行格式（便于程序解析）：
+1. **交叉验证**：动作清单里声明的每条命令，在 stdout 中是否找到真实执行痕迹（子串匹配）？找不到 = 嘴炮
+2. **占位符检测**：动作清单里含 '...' / '<...>' / 'TODO' 等占位符的，视为未真实执行
+3. **指令匹配**：动作清单里的动作是否真的回应了原始指令要求
+4. 输出严格按以下 2 行格式（便于程序解析）：
    评分: <0-10 的整数>
-   评语: <一句话评语，50 字以内>
+   评语: <一句话评语，50 字以内，优先点出嘴炮/缺验证/指令不匹配>
 
 评分参考：
-  9-10 完美完成，结果可信
-  7-8  大体完成，有小瑕疵
-  5-6  部分完成或结果存疑
-  3-4  明显未完成或错误
-  0-2  完全失败或无输出
+  9-10 完美完成，清单真实执行，无占位符
+  7-8  大体完成，小瑕疵（如未验证副作用）
+  5-6  部分完成或有 1-2 处占位符/缺验证
+  3-4  明显嘴炮：清单声明但 stdout 无执行证据
+  0-2  完全失败，清单为空或全是占位符
 `
 
 var (
@@ -60,6 +64,7 @@ type EvalResult struct {
 
 // Evaluate 调 claude --print 给 execution 打分。
 // 注意：execution 必须有 output；model 留空用默认 claude。
+// 评估员不传 WithActionReport()，避免自指（评估员不该自报清单）。
 func Evaluate(ctx context.Context, exec *backend.Execution, taskPrompt string, model string) (*EvalResult, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("execution is nil")
@@ -67,10 +72,34 @@ func Evaluate(ctx context.Context, exec *backend.Execution, taskPrompt string, m
 	if model == "" {
 		model = "haiku" // 默认用 haiku 快+便宜
 	}
+	stdout := exec.Output
+	stderr := exec.Error
+	report := ExtractActionReport(stdout)
+
+	// 把动作清单渲染成可读文本注入 prompt
+	reportText := "（AI 未输出动作清单）"
+	if len(report.Commands) > 0 {
+		var b strings.Builder
+		b.WriteString("| # | 命令 | 退出码 |\n|---|------|--------|\n")
+		for i, cmd := range report.Commands {
+			exit := "N/A"
+			if i < len(report.ExitCodes) {
+				if report.ExitCodes[i] == -1 {
+					exit = "N/A"
+				} else {
+					exit = strconv.Itoa(report.ExitCodes[i])
+				}
+			}
+			fmt.Fprintf(&b, "| %d | `%s` | %s |\n", i+1, cmd, exit)
+		}
+		reportText = b.String()
+	}
+
 	prompt := strings.TrimSpace(fmt.Sprintf(evalPromptTpl,
 		taskPrompt,
-		truncate(exec.Output, 3000),
-		truncate(exec.Error, 500),
+		reportText,
+		truncate(stdout, 3000),
+		truncate(stderr, 500),
 		exec.ExitCode,
 	))
 
