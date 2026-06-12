@@ -220,11 +220,14 @@ function parseEvalEvidence(comments) {
 async function runEvaluation(id) {
   const execId = id || currentExecId;
   if (!execId) { alert('请先打开一条执行'); return; }
+  // 评估时禁用 select 避免反复改
+  const sel = document.getElementById('eval-model-select');
+  if (sel) sel.disabled = true;
   const btn = event && event.target;
   const oldText = btn && btn.textContent;
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   try {
-    await fetchJSON('/api/executions/' + execId + '/evaluate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"model":"sonnet"}'});
+    await fetchJSON('/api/executions/' + execId + '/evaluate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model: getEvalModel()})});
     // 轮询拿结果（评估异步执行，最长 3 分钟）
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 2000));
@@ -241,7 +244,14 @@ async function runEvaluation(id) {
     alert('评估失败：' + e.message);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = oldText; }
+    if (sel) sel.disabled = false;
   }
+}
+
+// getEvalModel 读 exec-detail-modal 里的评估模型下拉
+function getEvalModel() {
+  const sel = document.getElementById('eval-model-select');
+  return sel ? sel.value : 'sonnet';
 }
 
 // renderExecOutput 解析 `claude -p --output-format json` 的输出，提取 result 字段。

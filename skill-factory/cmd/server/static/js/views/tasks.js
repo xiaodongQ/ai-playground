@@ -201,14 +201,50 @@ async function reopenTask(id) {
 }
 
 async function runTask(id) {
-  // 选运行方式：claude(默认，AI CLI 解释执行) / shell(直接 sh -c) / cbc(codebuddy)
-  // 留空则走后端默认 claude
-  const type = (prompt('运行方式：\n• claude（默认，AI CLI 解释执行）\n• shell（直接 sh -c 执行）\n• cbc（codebuddy CLI）\n留空用默认') || '').trim();
-  if (!confirm('立即用 ' + (type || 'claude') + ' 跑这个任务？流式输出会写入 executions 表。')) return;
+  const t = tasks.find(t => t.id === id) || (await loadTasks()).find(t => t.id === id);
+  if (!t) { alert('找不到任务：' + id); return; }
+  showRunTaskModal(t);
+}
+
+function showRunTaskModal(task) {
+  document.getElementById('run-task-title').textContent = task.title + (task.description ? ' — ' + task.description.slice(0, 60) : '');
+  document.getElementById('run-task-type').value = 'claude';
+  document.getElementById('run-task-model').value = 'sonnet';
+  toggleRunTaskModelGroup();
+  document.getElementById('run-task-modal').classList.remove('hidden');
+  // 存当前 taskId 供 submit 用
+  document.getElementById('run-task-modal').dataset.taskId = task.id;
+  // type 切换时联动 model 是否可选
+  const typeSel = document.getElementById('run-task-type');
+  typeSel.onchange = toggleRunTaskModelGroup;
+}
+
+function closeRunTaskModal() {
+  document.getElementById('run-task-modal').classList.add('hidden');
+}
+
+// type=shell 时 model 无效，灰显 model 下拉
+function toggleRunTaskModelGroup() {
+  const type = document.getElementById('run-task-type').value;
+  const grp = document.getElementById('run-task-model-group');
+  if (type === 'shell') {
+    grp.style.opacity = '0.4';
+    grp.style.pointerEvents = 'none';
+  } else {
+    grp.style.opacity = '1';
+    grp.style.pointerEvents = 'auto';
+  }
+}
+
+async function submitRunTask() {
+  const taskId = document.getElementById('run-task-modal').dataset.taskId;
+  const type = document.getElementById('run-task-type').value;
+  const model = document.getElementById('run-task-model').value;
+  closeRunTaskModal();
   try {
-    const body = type ? JSON.stringify({command_type: type}) : '{}';
-    const r = await fetchJSON(API + '/api/tasks/' + id + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body});
-    alert('已启动 execution_id=' + r.execution_id + '\n去"⚡ 自动化 Tab 最近执行"看流式输出');
+    const body = JSON.stringify({command_type: type, model: model});
+    const r = await fetchJSON(API + '/api/tasks/' + taskId + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body});
+    alert('已启动 execution_id=' + r.execution_id + '\n（' + type + (type !== 'shell' ? ' / ' + model : '') + '）\n去"⚡ 自动化 Tab 最近执行"看流式输出');
     reloadCurrentTab();
   } catch (e) { alert('启动失败：' + e.message); }
 }
