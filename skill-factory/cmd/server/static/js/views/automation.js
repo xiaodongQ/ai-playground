@@ -1,10 +1,63 @@
 // Automation Tab：scheduler 启停 + 定时任务列表 + scheduled modal + 最近 executions
 // 依赖 api.js
 
-async function loadAutomation() {
-  loadScheduler();
-  loadScheduled();
-  loadRecentExecutions();
+// auto-refresh 配置：默认 10s,最低 1s
+const REFRESH_KEY = 'automation.refreshSeconds';
+let autoRefreshTimer = null;
+let _autoRefreshEnabled = true;
+
+function getRefreshSeconds() {
+  const v = parseInt(localStorage.getItem(REFRESH_KEY) || '10', 10);
+  return isNaN(v) || v < 1 ? 10 : v;
+}
+function setRefreshSeconds(s) {
+  localStorage.setItem(REFRESH_KEY, String(s));
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    startAutoRefresh();
+  }
+  updateRefreshIndicator();
+}
+function startAutoRefresh() {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  const ms = getRefreshSeconds() * 1000;
+  autoRefreshTimer = setInterval(() => {
+    if (!_autoRefreshEnabled) return;
+    if (document.hidden) return; // 后台 tab 不刷
+    // modal 打开时只刷后台数据，不刷 modal 视图（避免覆盖用户正在看的内容）
+    const anyModalOpen = document.querySelector('.modal-overlay:not(.hidden)');
+    if (anyModalOpen && anyModalOpen.id !== 'exec-detail-modal') return;
+    loadAutomation({silent: true});
+  }, ms);
+  updateRefreshIndicator();
+}
+function stopAutoRefresh() {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  updateRefreshIndicator();
+}
+function updateRefreshIndicator() {
+  const el = document.getElementById('auto-refresh-indicator');
+  if (el) el.textContent = autoRefreshTimer ? `🔄 ${getRefreshSeconds()}s` : '⏸ 暂停';
+}
+
+async function loadAutomation(opts) {
+  await Promise.all([loadScheduler(), loadScheduled(), loadRecentExecutions()]);
+  if (!opts || !opts.silent) updateRefreshIndicator();
+}
+
+// 暴露给 HTML 控件
+function manualRefresh() { loadAutomation({silent: false}); }
+function changeRefreshSeconds(v) { setRefreshSeconds(parseInt(v, 10)); }
+function toggleAutoRefresh() {
+  if (autoRefreshTimer) { stopAutoRefresh(); _autoRefreshEnabled = false; }
+  else { _autoRefreshEnabled = true; startAutoRefresh(); }
+}
+
+// 页面首次进入启动 auto-refresh
+if (typeof window !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => { if (typeof loadAutomation === 'function') { startAutoRefresh(); } }, 500);
+  });
 }
 
 async function loadScheduledSummary() {
@@ -26,6 +79,10 @@ async function loadScheduledSummary() {
 
 async function loadScheduled() {
   const list = await fetchJSON('/api/scheduled');
+  // 顺手拉最近 exec，找 last_execution_id 对应的 completed_at 判断 running
+  const execs = await fetchJSON('/api/executions?limit=50').catch(() => []);
+  const execMap = {};
+  for (const e of (execs || [])) execMap[e.id] = e;
   const el = document.getElementById('scheduled-list');
   if (!list || list.length === 0) {
     el.innerHTML = '<div style="color:var(--text-secondary);font-size:13px;text-align:center;padding:40px 0">暂无定时任务<br><br><span style="font-size:12px">点击右上"+ 新建定时任务"创建<br>支持标准 cron 5 字段 或 @every 30s</span></div>';
@@ -33,19 +90,35 @@ async function loadScheduled() {
   }
   el.innerHTML = `<table><thead><tr><th>名称</th><th>Cron</th><th>类型</th><th>状态</th><th>最近执行</th><th>操作</th></tr></thead><tbody>` + list.map(s => {
     const lastRun = s.last_run_at ? new Date(s.last_run_at).toLocaleString() : '-';
-    const status = s.last_status || 'pending';
+    const baseStatus = s.last_status || 'pending';
+    // running 检测：last_execution_id 对应的 execution 没有 completed_at
+    let statusBadge = `<span class="s-status ${baseStatus}">${baseStatus}</span>`;
+    if (s.last_execution_id && execMap[s.last_execution_id] && !execMap[s.last_execution_id].completed_at) {
+      statusBadge = '<span class="s-status" style="background:var(--info,#3b82f6);color:#fff">运行中</span>';
+    }
+    const enabledBadge = s.enabled ? '' : ' <span style="color:var(--text-secondary);font-size:11px">(已禁用)</span>';
+    const toggleLabel = s.enabled ? '⏸ 停用' : '▶ 启用';
+    const toggleBtnClass = s.enabled ? 'btn btn-small' : 'btn btn-small btn-primary';
     return `<tr>
-      <td><strong>${esc(s.name)}</strong>${s.enabled ? '' : ' <span style="color:var(--text-secondary);font-size:11px">(已禁用)</span>'}</td>
+      <td><strong>${esc(s.name)}</strong>${enabledBadge}</td>
       <td><code>${esc(s.cron_expr)}</code></td>
       <td>${esc(s.command_type)}${s.model?' / '+esc(s.model):''}</td>
-      <td><span class="s-status ${status}">${status}</span></td>
+      <td>${statusBadge}</td>
       <td style="font-size:11px;color:var(--text-secondary)">${lastRun}</td>
       <td>
+        <button class="${toggleBtnClass}" onclick="toggleScheduled('${s.id}', ${s.enabled})" title="${s.enabled ? '停止调度' : '启用调度'}">${toggleLabel}</button>
         <button class="btn btn-small" onclick="runScheduled('${s.id}')">▶ 跑</button>
         <button class="btn btn-small" onclick="deleteScheduled('${s.id}')">删除</button>
       </td>
     </tr>`;
   }).join('') + '</tbody></table>';
+}
+
+function toggleScheduled(id, currentlyEnabled) {
+  fetch('/api/scheduled/' + id + '/toggle', {method:'POST'})
+    .then(r => r.json())
+    .then(() => { loadScheduled(); loadScheduledSummary(); })
+    .catch(e => alert('切换失败：' + e.message));
 }
 
 function showScheduledModal() {
@@ -228,6 +301,11 @@ async function runEvaluation(id) {
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   try {
     await fetchJSON('/api/executions/' + execId + '/evaluate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model: getEvalModel()})});
+    // 评估中状态：占位卡显示 spinner
+    if (currentExecId === execId) {
+      const card = document.getElementById('exec-detail-eval');
+      card.innerHTML = `<div style="font-size:13px"><span style="color:var(--info,#3b82f6)">⏳ 评估中…</span> <span style="color:var(--text-secondary);font-size:11px">${esc(getEvalModel())} · 预计 5-30s</span></div>`;
+    }
     // 轮询拿结果（评估异步执行，最长 3 分钟）
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 2000));
@@ -238,8 +316,17 @@ async function runEvaluation(id) {
         loadRecentExecutions();
         return;
       }
+      // 还在评估中，持续更新状态
+      if (currentExecId === execId && i % 2 === 0) {
+        const card = document.getElementById('exec-detail-eval');
+        card.innerHTML = `<div style="font-size:13px"><span style="color:var(--info,#3b82f6)">⏳ 评估中…</span> <span style="color:var(--text-secondary);font-size:11px">${esc(getEvalModel())} · 已 ${(i+1)*2}s</span></div>`;
+      }
     }
     alert('评估超时（>2 分钟），请检查 claude CLI 是否可用');
+    if (currentExecId === execId) {
+      const card = document.getElementById('exec-detail-eval');
+      card.innerHTML = `<div style="font-size:13px;color:var(--exception)">⚠ 评估超时</div>`;
+    }
   } catch (e) {
     alert('评估失败：' + e.message);
   } finally {

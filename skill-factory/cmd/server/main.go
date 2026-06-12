@@ -104,6 +104,7 @@ func (s *APIServer) routes() {
 	mux.HandleFunc("POST /api/scheduled", s.handleScheduledCreate)
 	mux.HandleFunc("GET /api/scheduled/{id}", s.handleScheduledGet)
 	mux.HandleFunc("PUT /api/scheduled/{id}", s.handleScheduledUpdate)
+	mux.HandleFunc("POST /api/scheduled/{id}/toggle", s.handleScheduledToggle)
 	mux.HandleFunc("DELETE /api/scheduled/{id}", s.handleScheduledDelete)
 	mux.HandleFunc("POST /api/scheduled/{id}/run-now", s.handleScheduledRunNow)
 
@@ -817,6 +818,23 @@ func (s *APIServer) handleScheduledDelete(w http.ResponseWriter, r *http.Request
 	}
 	_ = s.sch.Reload()
 	writeJSON(w, map[string]string{"id": id, "status": "deleted"})
+}
+
+// handleScheduledToggle 翻转 enabled 状态并 reload scheduler。
+func (s *APIServer) handleScheduledToggle(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	t, err := s.schedDB.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	t.Enabled = !t.Enabled
+	if err := s.schedDB.Update(t); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.sch.Reload()
+	writeJSON(w, t)
 }
 
 func (s *APIServer) handleScheduledRunNow(w http.ResponseWriter, r *http.Request) {
