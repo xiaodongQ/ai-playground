@@ -68,3 +68,58 @@ func TestParseEval(t *testing.T) {
 		}
 	}
 }
+
+func TestExtractActionReport(t *testing.T) {
+	stdout := `我先执行了通知:
+命令: osascript -e 'display notification "test" with title "hi"'
+退出码: 0
+
+然后我又跑了 pwd:
+命令: pwd
+退出码: 0
+`
+	report := ExtractActionReport(stdout)
+	if len(report.Commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d: %+v", len(report.Commands), report.Commands)
+	}
+	if report.Commands[0] != `osascript -e 'display notification "test" with title "hi"'` {
+		t.Errorf("cmd[0] = %q", report.Commands[0])
+	}
+	if report.Commands[1] != "pwd" {
+		t.Errorf("cmd[1] = %q", report.Commands[1])
+	}
+	if report.ExitCodes[0] != 0 {
+		t.Errorf("exit[0] = %d", report.ExitCodes[0])
+	}
+}
+
+func TestActionReportVerify(t *testing.T) {
+	// stdout 里包含清单声明的命令 → 真做了
+	stdout := "osascript -e 'display notification test'"
+	report := &ActionReport{
+		Commands:  []string{`osascript -e 'display notification test'`},
+		ExitCodes: []int{0},
+	}
+	res := VerifyActionReport(report, stdout)
+	if !res.AllExecuted {
+		t.Errorf("expected AllExecuted=true, got %+v", res)
+	}
+	if res.MissingCount != 0 {
+		t.Errorf("expected MissingCount=0, got %d", res.MissingCount)
+	}
+}
+
+func TestActionReportVerifyLie(t *testing.T) {
+	// 清单说有命令,但 stdout 里没有 → 嘴炮
+	report := &ActionReport{
+		Commands:  []string{`osascript -e 'display notification "test"'`},
+		ExitCodes: []int{0},
+	}
+	res := VerifyActionReport(report, "我没做任何事,直接告诉你完成了")
+	if res.AllExecuted {
+		t.Errorf("expected AllExecuted=false, got %+v", res)
+	}
+	if res.MissingCount != 1 {
+		t.Errorf("expected MissingCount=1, got %d", res.MissingCount)
+	}
+}

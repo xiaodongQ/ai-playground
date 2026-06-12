@@ -150,3 +150,74 @@ func GetByExecution(evalDB *backend.EvaluationRepo, execID string) (*backend.Eva
 	}
 	return list[0], nil
 }
+
+// ActionReport 从 AI 任务输出末尾的"动作清单"段提取的结构化数据。
+type ActionReport struct {
+	Commands  []string // AI 声明执行的命令
+	ExitCodes []int    // 对应退出码（N/A 用 -1）
+}
+
+var (
+	cmdLineRe  = regexp.MustCompile(`(?m)^-?\s*命令\s*[:：]\s*(.+?)\s*$`)
+	exitLineRe = regexp.MustCompile(`(?m)^-?\s*退出码\s*[:：]\s*(\d+|N/A)\s*$`)
+)
+
+// ExtractActionReport 从 stdout 提取 AI 自报的动作清单（简单 Markdown 解析）。
+// 找不到"## 动作清单"段时返回空报告，不报错。
+func ExtractActionReport(stdout string) *ActionReport {
+	r := &ActionReport{}
+	for _, m := range cmdLineRe.FindAllStringSubmatch(stdout, -1) {
+		cmd := strings.TrimSpace(m[1])
+		// 过滤占位符嘴炮：`...` / `<...>` / `(待填)` / `TODO` / `xxx`
+		if isPlaceholder(cmd) {
+			continue
+		}
+		r.Commands = append(r.Commands, cmd)
+	}
+	for _, m := range exitLineRe.FindAllStringSubmatch(stdout, -1) {
+		if m[1] == "N/A" {
+			r.ExitCodes = append(r.ExitCodes, -1)
+		} else {
+			n, _ := strconv.Atoi(m[1])
+			r.ExitCodes = append(r.ExitCodes, n)
+		}
+	}
+	return r
+}
+
+// ActionVerifyResult 验证结果。
+type ActionVerifyResult struct {
+	AllExecuted  bool     // 清单中所有命令在 stdout 中都出现过
+	MissingCount int      // 缺失（嘴炮）命令数
+	MissingCmds  []string // 缺失的命令列表
+}
+
+// VerifyActionReport 用 stdout 验证清单中的命令是否真实执行过。
+// 判定标准：命令字符串在 stdout 中出现过（子串匹配，容忍换行/缩进差异）。
+func VerifyActionReport(report *ActionReport, stdout string) *ActionVerifyResult {
+	res := &ActionVerifyResult{AllExecuted: true}
+	if report == nil || len(report.Commands) == 0 {
+		return res
+	}
+	// 标准化：去多余空白，方便子串匹配
+	norm := strings.Join(strings.Fields(stdout), " ")
+	for _, cmd := range report.Commands {
+		normCmd := strings.Join(strings.Fields(cmd), " ")
+		if !strings.Contains(norm, normCmd) {
+			res.AllExecuted = false
+			res.MissingCount++
+			res.MissingCmds = append(res.MissingCmds, cmd)
+		}
+	}
+	return res
+}
+
+func isPlaceholder(s string) bool {
+	placeholders := []string{"...", "…", "TODO", "xxx", "XXX", "<...>", "(待填)", "(占位)"}
+	for _, p := range placeholders {
+		if s == p || strings.Contains(s, p) {
+			return true
+		}
+	}
+	return false
+}
