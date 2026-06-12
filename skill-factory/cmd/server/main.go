@@ -279,8 +279,9 @@ func (s *APIServer) handleStats(w http.ResponseWriter, r *http.Request) {
 
 // Task execution
 
-// handleTaskRun 立即执行一次任务。command_type 暂默认 "shell"，prompt 必传
-// 或取自 task.description；不再 fallback 到 task.title（标题不是命令，避免
+// handleTaskRun 立即执行一次任务。command_type 默认 "claude"（让 AI CLI 解释
+// 执行 prompt），可显式传 "shell" / "cbc" 走其他 runner。prompt 必传或取自
+// task.description；不再 fallback 到 task.title（标题不是命令，避免
 // "两数之和: command not found" 之类的隐式错误）。prompt 仍空则报 400。
 // 真正"AI 任务"用法需要 experience_id 关联或 task 上预置 command_type/model——本阶段只跑通链路。
 func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
@@ -297,7 +298,7 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req) // body 可选
 	if req.CommandType == "" {
-		req.CommandType = "shell"
+		req.CommandType = "claude"
 	}
 	if req.Prompt == "" {
 		req.Prompt = task.Description

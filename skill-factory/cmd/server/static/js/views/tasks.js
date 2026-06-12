@@ -201,9 +201,13 @@ async function reopenTask(id) {
 }
 
 async function runTask(id) {
-  if (!confirm('立即用 AI CLI 跑这个任务？流式输出会写入 executions 表。')) return;
+  // 选运行方式：claude(默认，AI CLI 解释执行) / shell(直接 sh -c) / cbc(codebuddy)
+  // 留空则走后端默认 claude
+  const type = (prompt('运行方式：\n• claude（默认，AI CLI 解释执行）\n• shell（直接 sh -c 执行）\n• cbc（codebuddy CLI）\n留空用默认') || '').trim();
+  if (!confirm('立即用 ' + (type || 'claude') + ' 跑这个任务？流式输出会写入 executions 表。')) return;
   try {
-    const r = await fetchJSON(API + '/api/tasks/' + id + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    const body = type ? JSON.stringify({command_type: type}) : '{}';
+    const r = await fetchJSON(API + '/api/tasks/' + id + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body});
     alert('已启动 execution_id=' + r.execution_id + '\n去"⚡ 自动化 Tab 最近执行"看流式输出');
     reloadCurrentTab();
   } catch (e) { alert('启动失败：' + e.message); }
