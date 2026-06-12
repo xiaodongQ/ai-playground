@@ -397,8 +397,13 @@ func (r *ExecutionRepo) ListRecent(limit int) ([]*Execution, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	q := `SELECT id,task_id,scheduled_task_id,source,command,model,started_at,completed_at,output,error,exit_code
-	        FROM executions ORDER BY started_at DESC LIMIT ?`
+	// LEFT JOIN evaluations 取最近一次分数（每 exec 只关联最新一条）
+	q := `SELECT e.id,e.task_id,e.scheduled_task_id,e.source,e.command,e.model,
+	             e.started_at,e.completed_at,e.output,e.error,e.exit_code,
+	             (SELECT ev.score FROM evaluations ev
+	                WHERE ev.execution_id = e.id
+	                ORDER BY ev.created_at DESC LIMIT 1) AS eval_score
+	        FROM executions e ORDER BY e.started_at DESC LIMIT ?`
 	rows, err := r.db.Query(q, limit)
 	if err != nil {
 		return nil, err
@@ -409,9 +414,14 @@ func (r *ExecutionRepo) ListRecent(limit int) ([]*Execution, error) {
 		var e Execution
 		var taskID, schedID, model, output, errOut sql.NullString
 		var completedAt sql.NullTime
+		var evalScore sql.NullFloat64
 		if err := rows.Scan(&e.ID, &taskID, &schedID, &e.Source, &e.Command, &model,
-			&e.StartedAt, &completedAt, &output, &errOut, &e.ExitCode); err != nil {
+			&e.StartedAt, &completedAt, &output, &errOut, &e.ExitCode, &evalScore); err != nil {
 			return nil, err
+		}
+		if evalScore.Valid {
+			v := evalScore.Float64
+			e.EvaluationScore = &v
 		}
 		e.TaskID = taskID.String
 		e.ScheduledTaskID = schedID.String

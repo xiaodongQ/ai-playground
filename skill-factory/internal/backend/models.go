@@ -95,6 +95,8 @@ type Execution struct {
 	Output         string     `json:"output,omitempty"`
 	Error          string     `json:"error,omitempty"`
 	ExitCode       int        `json:"exit_code"`
+	// 最近一次评估分数（NULL = 未评估）。list 接口 JOIN 填，单 exec 接口也填。
+	EvaluationScore *float64   `json:"evaluation_score,omitempty"`
 }
 
 type Evaluation struct {
