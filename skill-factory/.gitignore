@@ -3,3 +3,4 @@ data/
 *.db-journal
 *.db
 bin/
+.codegraph
