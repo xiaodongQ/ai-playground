@@ -202,7 +202,6 @@ async function loadRecentExecutions() {
         <span style="font-size:11px;color:${statusColor}" title="${statusTitle}">${statusIcon}</span>
         ${evalBadge}
         <button class="btn btn-small" onclick="viewExecutionDetail('${e.id}')" title="查看详情">📋</button>
-        <button class="btn btn-small" onclick="viewExecutionDetail('${e.id}')" title="查看详情">📋</button>
         <button class="btn btn-small" onclick="runEvaluation('${e.id}')" title="AI 评估 (调 claude 打分 0-10)" style="${isEvaluating?'opacity:0.5;cursor:wait':''}">${isEvaluating?'⏳':'📊'}</button>
       </div>`;
     }).join('') + `<div style="padding:8px;text-align:center;color:var(--text-secondary);font-size:11px">
