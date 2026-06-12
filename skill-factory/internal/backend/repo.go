@@ -67,9 +67,9 @@ func InitSchema(db *sql.DB) error {
 		model TEXT,
 		started_at DATETIME,
 		completed_at DATETIME,
-		output TEXT,
-		error TEXT,
-		exit_code INTEGER
+		output TEXT NOT NULL DEFAULT '',
+		error TEXT NOT NULL DEFAULT '',
+		exit_code INTEGER NOT NULL DEFAULT 0
 	);
 	CREATE INDEX IF NOT EXISTS idx_executions_task ON executions(task_id, started_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_executions_scheduled ON executions(scheduled_task_id, started_at DESC);
@@ -318,8 +318,10 @@ type ExecutionRepo struct{ db *sql.DB }
 func NewExecutionRepo(db *sql.DB) *ExecutionRepo { return &ExecutionRepo{db: db} }
 
 func (r *ExecutionRepo) Create(e *Execution) error {
-	q := `INSERT INTO executions (id,task_id,scheduled_task_id,source,command,model,started_at)
-	        VALUES (?,?,?,?,?,?,?)`
+	// 显式插入所有字段，completed_at/output/error/exit_code 传 NULL/空/0，
+	// 避免"在跑中"行（未 Finish）这些字段为 NULL 时 ListRecent scan 炸。
+	q := `INSERT INTO executions (id,task_id,scheduled_task_id,source,command,model,started_at,completed_at,output,error,exit_code)
+	        VALUES (?,?,?,?,?,?,?,NULL,'','',0)`
 	_, err := r.db.Exec(q, e.ID, e.TaskID, e.ScheduledTaskID, e.Source, e.Command, e.Model, e.StartedAt)
 	return err
 }
