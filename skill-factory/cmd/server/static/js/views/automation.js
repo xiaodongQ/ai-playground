@@ -170,7 +170,9 @@ async function loadRecentExecutions() {
       const dt = new Date(e.started_at).toLocaleTimeString();
       const src = e.source === 'scheduled' ? '⏰' : '▶';
       const isRunning = !e.completed_at;
+      const isEvaluating = _evaluatingIds.has(e.id);
       let statusIcon, statusColor, statusTitle;
+      let evalBadge = '';
       if (isRunning) {
         statusIcon = '⏳'; statusColor = 'var(--info,#3b82f6)';
         statusTitle = '执行中…（尚未 Finish）';
@@ -181,11 +183,16 @@ async function loadRecentExecutions() {
         statusIcon = '✗ ' + e.exit_code; statusColor = 'var(--exception)';
         statusTitle = 'exit_code=' + e.exit_code;
       }
+      if (isEvaluating) {
+        evalBadge = ' <span class="s-status" style="background:var(--info,#3b82f6);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px">⏳ 评估中</span>';
+      }
       return `<div style="display:flex;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;align-items:center">
         <span title="${e.source}">${src}</span>
         <span style="color:var(--text-secondary);font-family:monospace">${dt}</span>
         <span style="flex:1;font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;text-decoration:underline dotted" onclick="viewExecutionDetail('${e.id}')" title="点击查看详情">${esc(e.command)}</span>
         <span style="font-size:11px;color:${statusColor}" title="${statusTitle}">${statusIcon}</span>
+        ${evalBadge}
+        <button class="btn btn-small" onclick="viewExecutionDetail('${e.id}')" title="查看详情">📋</button>
         <button class="btn btn-small" onclick="viewExecutionDetail('${e.id}')" title="查看详情">📋</button>
         <button class="btn btn-small" onclick="runEvaluation('${e.id}')" title="AI 评估 (调 claude 打分 0-10)">📊</button>
       </div>`;
@@ -299,9 +306,10 @@ async function runEvaluation(id) {
   const btn = event && event.target;
   const oldText = btn && btn.textContent;
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  _markEvaluating(execId, true);
   try {
     await fetchJSON('/api/executions/' + execId + '/evaluate', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({model: getEvalModel()})});
-    // 评估中状态：占位卡显示 spinner
+    // 评估中状态：弹窗 + 列表徽章（_markEvaluating 已刷列表）
     if (currentExecId === execId) {
       const card = document.getElementById('exec-detail-eval');
       card.innerHTML = `<div style="font-size:13px"><span style="color:var(--info,#3b82f6)">⏳ 评估中…</span> <span style="color:var(--text-secondary);font-size:11px">${esc(getEvalModel())} · 预计 5-30s</span></div>`;
@@ -312,6 +320,7 @@ async function runEvaluation(id) {
       const evals = await fetchJSON('/api/executions/' + execId + '/evaluations');
       if (evals && evals.length > 0) {
         if (currentExecId === execId) renderEvalCard(evals[0]);
+        _markEvaluating(execId, false);
         // 刷新列表（评分可能影响渲染）
         loadRecentExecutions();
         return;
@@ -323,11 +332,13 @@ async function runEvaluation(id) {
       }
     }
     alert('评估超时（>2 分钟），请检查 claude CLI 是否可用');
+    _markEvaluating(execId, false);
     if (currentExecId === execId) {
       const card = document.getElementById('exec-detail-eval');
       card.innerHTML = `<div style="font-size:13px;color:var(--exception)">⚠ 评估超时</div>`;
     }
   } catch (e) {
+    _markEvaluating(execId, false);
     alert('评估失败：' + e.message);
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = oldText; }
@@ -339,6 +350,14 @@ async function runEvaluation(id) {
 function getEvalModel() {
   const sel = document.getElementById('eval-model-select');
   return sel ? sel.value : 'sonnet';
+}
+
+// 正在评估的 execution id 集合（前端局部状态，刷新后清空）
+const _evaluatingIds = new Set();
+function _markEvaluating(execId, on) {
+  if (on) _evaluatingIds.add(execId); else _evaluatingIds.delete(execId);
+  // 立即刷新最近执行列表显示徽章
+  loadRecentExecutions();
 }
 
 // renderExecOutput 解析 `claude -p --output-format json` 的输出，提取 result 字段。
