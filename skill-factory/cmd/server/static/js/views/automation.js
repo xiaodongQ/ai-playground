@@ -151,7 +151,9 @@ async function viewExecutionDetail(id) {
   try {
     const exec = await fetchJSON('/api/executions/' + id);
     document.getElementById('exec-detail-cmd').value = exec.command || '';
-    document.getElementById('exec-detail-output').value = exec.output || '(无输出)';
+    // 解析 claude -p --output-format json：取 result 字段，附带 num_turns 元数据
+    const renderedOutput = renderExecOutput(exec.output);
+    document.getElementById('exec-detail-output').value = renderedOutput;
     document.getElementById('exec-detail-error').value = exec.error || '';
     const isRunning = !exec.completed_at;
     const ok = !isRunning && exec.exit_code === 0;
@@ -224,4 +226,34 @@ async function runEvaluation(id) {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = oldText; }
   }
+}
+
+// renderExecOutput 解析 `claude -p --output-format json` 的输出，提取 result 字段。
+// 非 JSON 格式 fallback 原样返回。
+function renderExecOutput(raw) {
+  if (!raw) return '(无输出)';
+  const trimmed = raw.trim();
+  // 必须以 { 开头且可解析为 JSON
+  if (!trimmed.startsWith('{')) return raw;
+  let obj;
+  try { obj = JSON.parse(trimmed); } catch { return raw; }
+  // claude json 输出结构
+  if (typeof obj.result === 'string') {
+    const lines = [];
+    lines.push(obj.result);
+    // 附加元数据头部（方便人工核查）
+    const meta = [];
+    if (typeof obj.num_turns === 'number') meta.push(`num_turns=${obj.num_turns}`);
+    if (obj.is_error) meta.push('is_error=true');
+    if (obj.stop_reason) meta.push(`stop_reason=${obj.stop_reason}`);
+    if (obj.permission_denials && obj.permission_denials.length) {
+      meta.push(`permission_denials=[${obj.permission_denials.join(',')}]`);
+    }
+    if (meta.length) {
+      lines.unshift('--- Claude JSON 元数据 ---');
+      lines.unshift(meta.join(' | '));
+    }
+    return lines.join('\n');
+  }
+  return raw;
 }

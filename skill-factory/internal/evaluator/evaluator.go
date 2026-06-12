@@ -4,6 +4,7 @@ package evaluator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -16,13 +17,16 @@ import (
 	"skill-factory/internal/executor/runner"
 )
 
-// 评分 prompt：要求 claude 基于"指令 vs AI 自报动作清单 vs 实际 stdout"三方对照打分。
-const evalPromptTpl = `你是一个严格的 AI 任务结果评估员。请基于"原始指令"、"AI 自报的动作清单"和"实际 stdout"三方对照，判断任务是否真正完成。
+// 评分 prompt：要求 claude 基于"指令 vs AI 自报动作清单 vs Claude 执行元数据 vs 实际 stdout"四方对照打分。
+const evalPromptTpl = `你是一个严格的 AI 任务结果评估员。请基于"原始指令"、"AI 自报的动作清单"、"Claude 执行元数据(JSON 解析)"和"实际 stdout"四方对照，判断任务是否真正完成。
 
 ## 任务原始指令
 %s
 
 ## AI 自报的动作清单（从任务输出末尾提取）
+%s
+
+## Claude 执行元数据（从 claude -p --output-format json 解析，**客观证据**）
 %s
 
 ## 任务实际输出（stdout，截断前 3000 字符）
@@ -35,12 +39,16 @@ const evalPromptTpl = `你是一个严格的 AI 任务结果评估员。请基�
 %d
 
 ## 评估要求
-1. **交叉验证**：动作清单里声明的每条命令，在 stdout 中是否找到真实执行痕迹（子串匹配）？找不到 = 嘴炮
-2. **占位符检测**：动作清单里含 '...' / '<...>' / 'TODO' 等占位符的，视为未真实执行
-3. **指令匹配**：动作清单里的动作是否真的回应了原始指令要求
-4. 输出严格按以下 2 行格式（便于程序解析）：
+1. **客观证据优先**：num_turns 是判定 AI 是否调过工具的硬信号。
+   - num_turns = 1: AI 一轮文字回答，**完全没调任何工具**。若 AI 声称执行了命令，100%% 嘴炮。
+   - num_turns >= 2: AI 至少调过 1 个工具。动作清单与实际执行可能吻合。
+   - **注意**: shell 类型任务不调 claude，stdout 是纯 shell 输出（无 JSON 元数据），**元数据缺失不代表嘴炮**——直接看 stdout 内容是否匹配指令。
+2. **交叉验证**：动作清单里声明的每条命令，在 stdout 中是否找到真实执行痕迹（子串匹配）？找不到 = 嘴炮
+3. **占位符检测**：动作清单里含 '...' / '<...>' / 'TODO' 等占位符的，视为未真实执行
+4. **指令匹配**：动作清单里的动作是否真的回应了原始指令要求
+5. 输出严格按以下 2 行格式（便于程序解析）：
    评分: <0-10 的整数>
-   评语: <一句话评语，50 字以内，优先点出嘴炮/缺验证/指令不匹配>
+   评语: <一句话评语，50 字以内，优先点出嘴炮/缺验证/指令不匹配）
 
 评分参考：
   9-10 完美完成，清单真实执行，无占位符
@@ -62,7 +70,7 @@ type EvalResult struct {
 	Comments string
 }
 
-// Evaluate 调 claude --print 给 execution 打分。
+// Evaluate 调 claude -p --output-format json 给 execution 打分。
 // 注意：execution 必须有 output；model 留空用默认 claude。
 // 评估员不传 WithActionReport()，避免自指（评估员不该自报清单）。
 func Evaluate(ctx context.Context, exec *backend.Execution, taskPrompt string, model string) (*EvalResult, error) {
@@ -95,9 +103,26 @@ func Evaluate(ctx context.Context, exec *backend.Execution, taskPrompt string, m
 		reportText = b.String()
 	}
 
+	// 解析 claude --output-format json 的执行元数据（关键：num_turns 是"是否调过工具"的硬信号）
+	metaText := "（非 JSON 格式，无法解析元数据）"
+	if meta, ok := ParseJSONExecution(stdout); ok {
+		var b strings.Builder
+		fmt.Fprintf(&b, "- num_turns: %d（>= 2 表示调过工具）\n", meta.NumTurns)
+		fmt.Fprintf(&b, "- is_error: %v\n", meta.IsError)
+		fmt.Fprintf(&b, "- stop_reason: %s\n", meta.StopReason)
+		fmt.Fprintf(&b, "- duration_ms: %d\n", meta.DurationMs)
+		if len(meta.PermissionDenials) > 0 {
+			fmt.Fprintf(&b, "- permission_denials: %v（被拒的工具调用）\n", meta.PermissionDenials)
+		} else {
+			b.WriteString("- permission_denials: （无）\n")
+		}
+		metaText = b.String()
+	}
+
 	prompt := strings.TrimSpace(fmt.Sprintf(evalPromptTpl,
 		taskPrompt,
 		reportText,
+		metaText,
 		truncate(stdout, 3000),
 		truncate(stderr, 500),
 		exec.ExitCode,
@@ -116,6 +141,11 @@ func Evaluate(ctx context.Context, exec *backend.Execution, taskPrompt string, m
 	if res.ExitCode != 0 {
 		return nil, fmt.Errorf("claude returned exit %d, stderr: %s", res.ExitCode, truncate(res.ErrorOut, 200))
 	}
+	// 评估员自身也是 -p --output-format json 输出，先取 .result 字段再 parseEval
+	if r, ok := ParseEvalOutput(res.Output); ok {
+		return r, nil
+	}
+	// 非 JSON 格式时回落到老逻辑（兼容历史数据）
 	return parseEval(res.Output), nil
 }
 
@@ -249,4 +279,64 @@ func isPlaceholder(s string) bool {
 		}
 	}
 	return false
+}
+
+// ExecutionMeta 从 `claude -p --output-format json` 输出解析的执行元数据。
+// 关键信号：NumTurns(>=2 表示调过工具)、PermissionDenials(被拒的工具)、IsError。
+type ExecutionMeta struct {
+	IsError           bool
+	NumTurns          int
+	Result            string // AI 文本回答（替代原来 stdout 的"全部内容"）
+	StopReason        string
+	DurationMs        int
+	PermissionDenials []string // 被拒的工具名列表
+}
+
+// ParseJSONExecution 尝试把 stdout 解析为 `claude --output-format json` 的输出。
+// 解析失败时返回 (nil, false)，调用方应 fallback 到按纯文本处理。
+func ParseJSONExecution(stdout string) (*ExecutionMeta, bool) {
+	stdout = strings.TrimSpace(stdout)
+	if !strings.HasPrefix(stdout, "{") {
+		return nil, false
+	}
+	var raw struct {
+		IsError           bool     `json:"is_error"`
+		NumTurns          int      `json:"num_turns"`
+		Result            string   `json:"result"`
+		StopReason        string   `json:"stop_reason"`
+		DurationMs        int      `json:"duration_ms"`
+		PermissionDenials []string `json:"permission_denials"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &raw); err != nil {
+		return nil, false
+	}
+	return &ExecutionMeta{
+		IsError:           raw.IsError,
+		NumTurns:          raw.NumTurns,
+		Result:            raw.Result,
+		StopReason:        raw.StopReason,
+		DurationMs:        raw.DurationMs,
+		PermissionDenials: raw.PermissionDenials,
+	}, true
+}
+
+// ToolUseLikely 判断 AI 是否"很可能调过工具"。
+// 判定标准：num_turns >= 2（单 turn 不可能调工具）或被拒工具非空。
+// 返回 true 时评估员可以提高对"声称执行了"的信任度。
+func (m *ExecutionMeta) ToolUseLikely() bool {
+	if m == nil {
+		return false
+	}
+	return m.NumTurns >= 2 || len(m.PermissionDenials) > 0
+}
+
+// ParseEvalOutput 解析评估员（claude -p --output-format json）的输出，从 result 字段提取 "评分: X" 和 "评语: Y"。
+// 评估员自己的输出也是 JSON 格式，需要先取 .result 拿到"评分: X 评语: Y"纯文本。
+// 解析失败时返回 (nil, false)。
+func ParseEvalOutput(stdout string) (*EvalResult, bool) {
+	meta, ok := ParseJSONExecution(stdout)
+	if !ok {
+		return nil, false
+	}
+	return parseEval(meta.Result), true
 }

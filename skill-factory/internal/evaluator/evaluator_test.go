@@ -123,3 +123,41 @@ func TestActionReportVerifyLie(t *testing.T) {
 		t.Errorf("expected MissingCount=1, got %d", res.MissingCount)
 	}
 }
+
+func TestParseJSONExecution(t *testing.T) {
+	stdout := `{"type":"result","is_error":false,"num_turns":3,"result":"hello","stop_reason":"end_turn","duration_ms":12000,"permission_denials":["WebFetch"]}`
+	meta, ok := ParseJSONExecution(stdout)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if meta.NumTurns != 3 {
+		t.Errorf("NumTurns = %d, want 3", meta.NumTurns)
+	}
+	if meta.Result != "hello" {
+		t.Errorf("Result = %q, want hello", meta.Result)
+	}
+	if !meta.ToolUseLikely() {
+		t.Error("ToolUseLikely should be true (num_turns >= 2)")
+	}
+}
+
+func TestParseJSONExecutionNotJSON(t *testing.T) {
+	_, ok := ParseJSONExecution("plain text output")
+	if ok {
+		t.Error("expected !ok for plain text")
+	}
+}
+
+func TestParseJSONExecutionToolUseLikelyFalse(t *testing.T) {
+	meta := &ExecutionMeta{NumTurns: 1, PermissionDenials: nil}
+	if meta.ToolUseLikely() {
+		t.Error("ToolUseLikely should be false for num_turns=1, no denials")
+	}
+}
+
+func TestParseJSONExecutionNil(t *testing.T) {
+	var m *ExecutionMeta
+	if m.ToolUseLikely() {
+		t.Error("nil receiver should return false")
+	}
+}

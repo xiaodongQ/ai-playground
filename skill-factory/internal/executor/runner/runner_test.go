@@ -10,7 +10,7 @@ func TestBuildCommandClaude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"claude", "--print", "--verbose", "--model", "sonnet", "--session-id", "sess-1", "解析 slowlog"}
+	want := []string{"claude", "-p", "--output-format", "json", "--model", "sonnet", "--session-id", "sess-1", "解析 slowlog"}
 	if len(got) != len(want) {
 		t.Fatalf("len = %d, want %d: %v", len(got), len(want), got)
 	}

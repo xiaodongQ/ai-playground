@@ -11,7 +11,10 @@ import (
 
 // BuildCommand 根据类型构造命令列表，避免 shell 注入。
 //
-// claude:   claude --print --verbose [--allowedTools ...] [--model <m>] [--session-id <sid>] "<prompt>"
+// claude:   claude -p --output-format json [--model <m>] [--session-id <sid>] "<prompt>"
+//
+//	输出为单次 JSON（含 num_turns / result / is_error 等元数据，便于 evaluator 判定真伪）
+//
 // cbc:      cbc -p [--model <m>] "<prompt>"   （PATH 中无 cbc 时回落到 codebuddy）
 // shell:    sh -c "<prompt>"
 func BuildCommand(typ, model, sessionID, prompt string, opts ...func(*buildOpts)) ([]string, error) {
@@ -26,7 +29,7 @@ func BuildCommand(typ, model, sessionID, prompt string, opts ...func(*buildOpts)
 	}
 	switch typ {
 	case "claude":
-		cmd := []string{"claude", "--print", "--verbose"}
+		cmd := []string{"claude", "-p", "--output-format", "json"}
 		if model != "" {
 			cmd = append(cmd, "--model", model)
 		}
