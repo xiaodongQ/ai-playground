@@ -1041,7 +1041,12 @@ func errStr(err error) string {
 func main() {
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
-		dbPath = "skill-factory.db"
+		dbPath = "data/skill-factory.db"
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		slog.Info("db path", slog.String("path", dbPath), slog.String("cwd", cwd))
+	} else {
+		slog.Info("db path", slog.String("path", dbPath))
 	}
 
 	db, err := backend.OpenDB(dbPath)
