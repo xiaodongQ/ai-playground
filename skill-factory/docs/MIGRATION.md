@@ -49,7 +49,7 @@ cp data/skill-factory.db data/skill-factory.db.v1.bak
 
 # 2. 启动新版本（自动建表 + 迁移）
 go build -o skill-factory ./cmd/server
-DB_PATH=./data/skill-factory.db ADDR=:8080 ./skill-factory
+DB_PATH=./data/skill-factory.db ADDR=:8901 ./skill-factory
 # 9 张表自动建好，旧数据保留
 
 # 3. 验证

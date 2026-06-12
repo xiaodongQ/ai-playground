@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # skill-factory 启动脚本
 # 用法：
-#   ./scripts/run.sh                # 启动（默认 :8080，二进制不存在时自动编译）
+#   ./scripts/run.sh                # 启动（默认 :8901，二进制不存在时自动编译）
 #   ./scripts/run.sh --stop         # 停止
 #   ./scripts/run.sh --restart      # 重启
 #   ./scripts/run.sh --port 9090    # 自定义端口
@@ -11,7 +11,7 @@
 #
 # 环境变量：
 #   DB_PATH  SQLite 路径（默认 ./data/skill-factory.db）
-#   ADDR     监听地址（默认 :8080，可被 --port 覆盖）
+#   ADDR     监听地址（默认 :8901，可被 --port 覆盖）
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,14 +20,14 @@ BIN="./bin/skill-factory"
 PID_FILE="./bin/skill-factory.pid"
 LOG_FILE="./bin/skill-factory.log"
 DB_PATH="${DB_PATH:-./data/skill-factory.db}"
-ADDR="${ADDR:-:8080}"
+ADDR="${ADDR:-:8901}"
 
 usage() {
   cat <<EOF
 Usage: $0 [option]
 
 Options:
-  (无)             启动（默认 :8080，二进制不存在时自动 ./scripts/build.sh）
+  (无)             启动（默认 :8901，二进制不存在时自动 ./scripts/build.sh）
   --stop           停止
   --restart        重启
   --port PORT      自定义端口（如 9090）
@@ -37,7 +37,7 @@ Options:
 
 环境变量：
   DB_PATH          SQLite 路径（默认 ./data/skill-factory.db）
-  ADDR             监听地址（默认 :8080）
+  ADDR             监听地址（默认 :8901）
 
 文件：
   二进制：${BIN}

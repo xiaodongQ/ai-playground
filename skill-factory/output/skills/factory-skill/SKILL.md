@@ -9,7 +9,7 @@ description: "从 skill-factory 后台管理系统拉取任务、TDD 开发迭�
 
 ## 前置要求
 
-1. **后台管理系统**已运行（默认 http://localhost:8080）
+1. **后台管理系统**已运行（默认 http://localhost:8901）
 2. **经验库**已初始化目标模块知识
 3. **验收样例**已录入（正向 + 反向用例）
 
@@ -18,13 +18,13 @@ description: "从 skill-factory 后台管理系统拉取任务、TDD 开发迭�
 ### Step 1: 拉取待认领任务
 
 ```bash
-curl -s http://localhost:8080/api/tasks?status=pending | jq '.[0]'
+curl -s http://localhost:8901/api/tasks?status=pending | jq '.[0]'
 ```
 
 ### Step 2: 任务认领
 
 ```bash
-curl -s -X PUT http://localhost:8080/api/tasks/{task_id}/status \
+curl -s -X PUT http://localhost:8901/api/tasks/{task_id}/status \
   -H "Content-Type: application/json" \
   -d '{"status":"in_progress","maintainer":"factory-agent"}'
 ```
@@ -32,7 +32,7 @@ curl -s -X PUT http://localhost:8080/api/tasks/{task_id}/status \
 ### Step 3: 获取前置经验库
 
 ```bash
-curl -s http://localhost:8080/api/experiences?module=redis-cluster | jq '.'
+curl -s http://localhost:8901/api/experiences?module=redis-cluster | jq '.'
 ```
 
 ### Step 4: TDD 开发循环（最多 20 轮）
@@ -59,7 +59,7 @@ done
 ### Step 5: 上传产物并归档
 
 ```bash
-curl -s -X PUT http://localhost:8080/api/tasks/{task_id}/status \
+curl -s -X PUT http://localhost:8901/api/tasks/{task_id}/status \
   -H "Content-Type: application/json" \
   -d '{"status":"archived","result":{"skill_file":"skills/xxx/SKILL.md","final_accuracy":1.0}}'
 ```

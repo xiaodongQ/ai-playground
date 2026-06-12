@@ -1092,7 +1092,7 @@ func main() {
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
-		addr = ":8080"
+		addr = ":8901"
 	}
 	log.Printf("Skill Factory started at http://localhost%s", addr)
 	if err := http.ListenAndServe(addr, srv); err != nil {

@@ -12,10 +12,10 @@
 git clone <repo>
 cd skill-factory
 go build -o skill-factory ./cmd/server
-DB_PATH=./data/skill-factory.db ADDR=:8080 ./skill-factory
+DB_PATH=./data/skill-factory.db ADDR=:8901 ./skill-factory
 ```
 
-浏览器打开 [http://localhost:8080](http://localhost:8080)，看到 5 Tab + 5 widget 即可。
+浏览器打开 [http://localhost:8901](http://localhost:8901)，看到 5 Tab + 5 widget 即可。
 
 ## 5 分钟 demo（5 个新功能）
 
@@ -75,22 +75,22 @@ GOOS=windows GOARCH=amd64 go build -o skill-factory.exe ./cmd/server
 
 ```bash
 # 任务
-curl localhost:8080/api/tasks
-curl -X POST localhost:8080/api/tasks -d '{"title":"x","description":"y"}' -H "Content-Type: application/json"
-curl -X POST localhost:8080/api/tasks/{id}/run -d '{"command_type":"shell","prompt":"echo hi"}' -H "Content-Type: application/json"
+curl localhost:8901/api/tasks
+curl -X POST localhost:8901/api/tasks -d '{"title":"x","description":"y"}' -H "Content-Type: application/json"
+curl -X POST localhost:8901/api/tasks/{id}/run -d '{"command_type":"shell","prompt":"echo hi"}' -H "Content-Type: application/json"
 
 # 5 个新功能
-curl localhost:8080/api/web-links
-curl -X POST localhost:8080/api/web-links -d '{"name":"GitHub","url":"https://github.com/xiaodongQ/"}' -H "Content-Type: application/json"
-curl -X POST localhost:8080/api/dir-shortcuts -d '{"name":"code","path":"~/code"}' -H "Content-Type: application/json"
-curl -X POST localhost:8080/api/dir-shortcuts/{id}/open    # 调系统资源管理器
-curl -X POST localhost:8080/api/scheduled -d '{"name":"heartbeat","cron_expr":"@every 30s","command_type":"shell","prompt":"echo tick","enabled":true}' -H "Content-Type: application/json"
-curl -X POST localhost:8080/api/scheduler/start
-curl -X PUT localhost:8080/api/todo/path -d '{"path":"/path/to/todo.md"}' -H "Content-Type: application/json"
-curl -X PUT localhost:8080/api/todo/1 -d '{"done":true}' -H "Content-Type: application/json"  # line 1 勾选
+curl localhost:8901/api/web-links
+curl -X POST localhost:8901/api/web-links -d '{"name":"GitHub","url":"https://github.com/xiaodongQ/"}' -H "Content-Type: application/json"
+curl -X POST localhost:8901/api/dir-shortcuts -d '{"name":"code","path":"~/code"}' -H "Content-Type: application/json"
+curl -X POST localhost:8901/api/dir-shortcuts/{id}/open    # 调系统资源管理器
+curl -X POST localhost:8901/api/scheduled -d '{"name":"heartbeat","cron_expr":"@every 30s","command_type":"shell","prompt":"echo tick","enabled":true}' -H "Content-Type: application/json"
+curl -X POST localhost:8901/api/scheduler/start
+curl -X PUT localhost:8901/api/todo/path -d '{"path":"/path/to/todo.md"}' -H "Content-Type: application/json"
+curl -X PUT localhost:8901/api/todo/1 -d '{"done":true}' -H "Content-Type: application/json"  # line 1 勾选
 
 # WebSocket
-wscat -c ws://localhost:8080/ws
+wscat -c ws://localhost:8901/ws
 ```
 
 完整端点列表见 [DESIGN.md §5](DESIGN.md#5-api30-端点)。
