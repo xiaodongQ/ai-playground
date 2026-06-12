@@ -279,7 +279,9 @@ func (s *APIServer) handleStats(w http.ResponseWriter, r *http.Request) {
 
 // Task execution
 
-// handleTaskRun 立即执行一次任务。command_type 暂默认 "shell"，prompt 来自 task.description。
+// handleTaskRun 立即执行一次任务。command_type 暂默认 "shell"，prompt 必传
+// 或取自 task.description；不再 fallback 到 task.title（标题不是命令，避免
+// "两数之和: command not found" 之类的隐式错误）。prompt 仍空则报 400。
 // 真正"AI 任务"用法需要 experience_id 关联或 task 上预置 command_type/model——本阶段只跑通链路。
 func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -301,7 +303,13 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 		req.Prompt = task.Description
 	}
 	if req.Prompt == "" {
-		req.Prompt = task.Title
+		slog.Warn("task run rejected: empty prompt",
+			slog.String("task_id", id),
+			slog.String("command_type", req.CommandType),
+		)
+		writeErr(w, http.StatusBadRequest,
+			"prompt is required (request body, or task.description)")
+		return
 	}
 
 	cmd, err := runner.BuildCommand(req.CommandType, req.Model, "", req.Prompt)
