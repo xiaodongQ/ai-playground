@@ -473,7 +473,7 @@ func (s *APIServer) handleExecutionEvaluate(w http.ResponseWriter, r *http.Reque
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.Model == "" {
-		req.Model = "haiku"
+		req.Model = "sonnet"
 	}
 	// 找 task prompt：优先 task.description，否则用 prompt 字段
 	prompt := exec.Command

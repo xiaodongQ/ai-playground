@@ -192,13 +192,29 @@ function renderEvalCard(ev) {
   const cardStyle = isParseFailed
     ? 'font-size:13px;color:var(--text-secondary);font-style:italic'
     : 'font-size:13px';
+  // 从评语里解析 num_turns / permission_denials 客观证据（sonnet 评语里常含）
+  const evidence = parseEvalEvidence(ev.comments || '');
   document.getElementById('exec-detail-eval').innerHTML = `
     <div style="${cardStyle}">
       📊 AI 评估: <b style="color:${color};font-size:18px">${scoreDisplay}</b>
       <span style="color:var(--text-secondary);font-size:11px;margin-left:8px">${esc(ev.evaluator_model || '')} · ${esc(new Date(ev.created_at).toLocaleString())}</span>
+      ${evidence.numTurnsBadge}
     </div>
     ${ev.comments ? `<div style="margin-top:6px;color:var(--text-secondary);font-size:12px;white-space:pre-wrap">${esc(ev.comments)}</div>` : ''}
   `;
+}
+
+// parseEvalEvidence 从评语里 grep num_turns=N / permission_denials=[...] 等客观证据。
+// sonnet 评语常包含 "num_turns=3, 退出码 0" 这种描述，匹配到直接做小徽章显示。
+function parseEvalEvidence(comments) {
+  const out = { numTurns: null, badge: '', numTurnsBadge: '' };
+  const m = comments.match(/num_turns\s*=\s*(\d+)/i);
+  if (m) {
+    out.numTurns = parseInt(m[1], 10);
+    const tool = out.numTurns >= 2;
+    out.numTurnsBadge = ` <span title="Claude 任务执行 turn 数：>= 2 表示调过工具（客观证据）" style="margin-left:6px;padding:1px 6px;border-radius:8px;font-size:10px;background:${tool?'#d4edda':'#f8d7da'};color:${tool?'#155724':'#721c24'}">turns=${out.numTurns}${tool?' 🔧':' 💬'}</span>`;
+  }
+  return out;
 }
 
 async function runEvaluation(id) {
@@ -208,7 +224,7 @@ async function runEvaluation(id) {
   const oldText = btn && btn.textContent;
   if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
   try {
-    await fetchJSON('/api/executions/' + execId + '/evaluate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"model":"haiku"}'});
+    await fetchJSON('/api/executions/' + execId + '/evaluate', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"model":"sonnet"}'});
     // 轮询拿结果（评估异步执行，最长 3 分钟）
     for (let i = 0; i < 60; i++) {
       await new Promise(r => setTimeout(r, 2000));
