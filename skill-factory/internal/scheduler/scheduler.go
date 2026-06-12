@@ -119,7 +119,7 @@ func (s *Scheduler) makeHandler(t *backend.ScheduledTask) func() {
 }
 
 func (s *Scheduler) execute(t *backend.ScheduledTask) {
-	cmd, err := runner.BuildCommand(t.CommandType, t.Model, "", t.Prompt)
+	cmd, err := runner.BuildCommand(t.CommandType, t.Model, "", t.Prompt, runner.WithActionReport())
 	if err != nil {
 		log.Printf("[scheduler] build cmd for %s: %v", t.Name, err)
 		_ = s.repo.UpdateAfterRun(t.ID, "build_error", "")

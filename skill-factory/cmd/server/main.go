@@ -313,7 +313,7 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cmd, err := runner.BuildCommand(req.CommandType, req.Model, "", req.Prompt)
+	cmd, err := runner.BuildCommand(req.CommandType, req.Model, "", req.Prompt, runner.WithActionReport())
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
