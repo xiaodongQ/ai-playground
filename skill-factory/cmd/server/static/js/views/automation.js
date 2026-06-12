@@ -184,9 +184,12 @@ async function loadRecentExecutions() {
         statusTitle = 'exit_code=' + e.exit_code;
       }
       if (isEvaluating) {
-        evalBadge = ' <span class="s-status" style="background:var(--info,#3b82f6);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px">⏳ 评估中</span>';
+        evalBadge = ' <span class="s-status" style="background:var(--info,#3b82f6);color:#fff;font-size:11px;font-weight:600;padding:2px 10px;border-radius:10px;animation:pulse 1.5s ease-in-out infinite">⏳ 评估中</span>';
       }
-      return `<div style="display:flex;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;align-items:center">
+      const rowStyle = isEvaluating
+        ? 'display:flex;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;align-items:center;background:rgba(59,130,246,0.08);border-left:3px solid #3b82f6'
+        : 'display:flex;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;align-items:center';
+      return `<div style="${rowStyle}">
         <span title="${e.source}">${src}</span>
         <span style="color:var(--text-secondary);font-family:monospace">${dt}</span>
         <span style="flex:1;font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;text-decoration:underline dotted" onclick="viewExecutionDetail('${e.id}')" title="点击查看详情">${esc(e.command)}</span>
@@ -194,7 +197,7 @@ async function loadRecentExecutions() {
         ${evalBadge}
         <button class="btn btn-small" onclick="viewExecutionDetail('${e.id}')" title="查看详情">📋</button>
         <button class="btn btn-small" onclick="viewExecutionDetail('${e.id}')" title="查看详情">📋</button>
-        <button class="btn btn-small" onclick="runEvaluation('${e.id}')" title="AI 评估 (调 claude 打分 0-10)">📊</button>
+        <button class="btn btn-small" onclick="runEvaluation('${e.id}')" title="AI 评估 (调 claude 打分 0-10)" style="${isEvaluating?'opacity:0.5;cursor:wait':''}">${isEvaluating?'⏳':'📊'}</button>
       </div>`;
     }).join('') + `<div style="padding:8px;text-align:center;color:var(--text-secondary);font-size:11px">
         当前显示 ${list.length} 条（请求 ${recentExecLimit} 条）

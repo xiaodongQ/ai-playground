@@ -395,3 +395,4 @@ tr:last-child td { border-bottom: none; }
 .scheduled-item .s-status { font-size: 10px; padding: 1px 6px; border-radius: 8px; background: var(--hover); color: var(--text-secondary); }
 .scheduled-item .s-status.success { background: rgba(16, 185, 129, 0.15); color: var(--archived); }
 .scheduled-item .s-status.failed { background: rgba(239, 68, 68, 0.15); color: var(--exception); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
