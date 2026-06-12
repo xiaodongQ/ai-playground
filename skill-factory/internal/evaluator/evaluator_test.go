@@ -42,7 +42,7 @@ func TestParseEval(t *testing.T) {
 		{
 			name:      "完全乱码",
 			in:        "I don't know how to format this",
-			wantScore: 0, // 解析失败 fallback
+			wantScore: -1, // 解析失败,不再 fallback 到 0
 			wantCmt:   "I don't know how to format this",
 		},
 		{
@@ -50,6 +50,12 @@ func TestParseEval(t *testing.T) {
 			in:        "我先分析一下...\n评分: 9\n评语: 一次性通过",
 			wantScore: 9,
 			wantCmt:   "一次性通过",
+		},
+		{
+			name:      "缺评语 + 无分数行时 Score=-1",
+			in:        "我做完了",
+			wantScore: -1,     // 改:旧 fallback 到 0,新行为保留 -1 表示解析失败
+			wantCmt:   "我做完了", // 原文 fallback
 		},
 	}
 	for _, c := range cases {

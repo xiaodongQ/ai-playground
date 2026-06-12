@@ -90,8 +90,8 @@ func Evaluate(ctx context.Context, exec *backend.Execution, taskPrompt string, m
 	return parseEval(res.Output), nil
 }
 
-// parseEval 解析 claude 输出，提取"评分: X"和"评语: ..."。
-// 解析失败时保留原始 output 在 Comments，Score 留 -1（前端可显示"未解析"）。
+// parseEval 解析 claude 输出,提取"评分: X"和"评语: ..."。
+// 解析失败时 Score 保持 -1,Comments 保留原始 output,方便前端识别"解析失败" vs "真低分"。
 func parseEval(output string) *EvalResult {
 	res := &EvalResult{Score: -1, Comments: strings.TrimSpace(output)}
 	if m := scoreRe.FindStringSubmatch(output); len(m) >= 2 {
@@ -101,15 +101,12 @@ func parseEval(output string) *EvalResult {
 	}
 	if m := cmtRe.FindStringSubmatch(output); len(m) >= 2 {
 		res.Comments = strings.TrimSpace(m[1])
-		// 解析出评语但 score 失败：把完整 output 附加便于排查
-		if res.Score == -1 {
-			res.Comments = strings.TrimSpace(m[1]) + "\n[原始输出]\n" + strings.TrimSpace(output)
-		}
 	}
-	// 完全没匹配到评语：score 留 -1
-	if res.Score == -1 {
-		res.Score = 0 // 前端需要数字，给 0
+	// 解析出评语但 score 失败:把完整 output 附加便于排查
+	if res.Score == -1 && res.Comments != strings.TrimSpace(output) {
+		res.Comments = res.Comments + "\n[原始输出]\n" + strings.TrimSpace(output)
 	}
+	// 注意:不再 fallback 到 0,保留 -1 表示"无法解析"
 	return res
 }
 
