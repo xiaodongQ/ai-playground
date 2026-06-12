@@ -356,10 +356,10 @@
       <label>Prompt <span class="field-hint">必填 · shell 时为命令，claude/cbc 时为 prompt</span></label>
       <textarea id="sched-prompt" rows="4" placeholder='claude/cbc: "请检查项目状态并提交周报"&#10;shell: "echo hello && date"'></textarea>
     </div>
-    <div class="form-group">
-      <label>
-        <input type="checkbox" id="sched-enabled" checked> 启用
-      </label>
+    <div class="form-group" style="display:flex;align-items:center;gap:8px;padding:6px 0;margin-bottom:8px">
+      <input type="checkbox" id="sched-enabled" checked style="width:16px;height:16px;cursor:pointer;margin:0">
+      <label for="sched-enabled" style="margin:0;cursor:pointer;font-size:13px;color:var(--text);font-weight:500">启用此定时任务</label>
+      <span class="field-hint" style="margin-left:4px">勾选后会被 cron 调度</span>
     </div>
     <div class="modal-actions">
       <button class="btn btn-secondary" onclick="closeScheduledModal()">取消</button>
