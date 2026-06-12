@@ -182,13 +182,20 @@ function closeExecDetailModal() {
 
 function renderEvalCard(ev) {
   const score = ev.score;
-  const color = score >= 8 ? 'var(--archived)' : score >= 5 ? 'var(--warning)' : 'var(--exception)';
+  const isParseFailed = score < 0; // -1 表示评估员输出无法解析
+  const color = isParseFailed
+    ? 'var(--text-secondary)'
+    : score >= 8 ? 'var(--archived)' : score >= 5 ? 'var(--warning)' : 'var(--exception)';
+  const scoreDisplay = isParseFailed ? '解析失败' : `${score}/10`;
+  const cardStyle = isParseFailed
+    ? 'font-size:13px;color:var(--text-secondary);font-style:italic'
+    : 'font-size:13px';
   document.getElementById('exec-detail-eval').innerHTML = `
-    <div style="font-size:13px">
-      📊 AI 评估: <b style="color:${color};font-size:18px">${score}/10</b>
+    <div style="${cardStyle}">
+      📊 AI 评估: <b style="color:${color};font-size:18px">${scoreDisplay}</b>
       <span style="color:var(--text-secondary);font-size:11px;margin-left:8px">${esc(ev.evaluator_model || '')} · ${esc(new Date(ev.created_at).toLocaleString())}</span>
     </div>
-    ${ev.comments ? `<div style="margin-top:6px;color:var(--text-secondary);font-size:12px">${esc(ev.comments)}</div>` : ''}
+    ${ev.comments ? `<div style="margin-top:6px;color:var(--text-secondary);font-size:12px;white-space:pre-wrap">${esc(ev.comments)}</div>` : ''}
   `;
 }
 

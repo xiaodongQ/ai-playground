@@ -42,7 +42,7 @@ func TestParseEval(t *testing.T) {
 		{
 			name:      "完全乱码",
 			in:        "I don't know how to format this",
-			wantScore: 0, // 解析失败 fallback
+			wantScore: -1, // 解析失败,不再 fallback 到 0
 			wantCmt:   "I don't know how to format this",
 		},
 		{
@@ -50,6 +50,12 @@ func TestParseEval(t *testing.T) {
 			in:        "我先分析一下...\n评分: 9\n评语: 一次性通过",
 			wantScore: 9,
 			wantCmt:   "一次性通过",
+		},
+		{
+			name:      "缺评语 + 无分数行时 Score=-1",
+			in:        "我做完了",
+			wantScore: -1,     // 改:旧 fallback 到 0,新行为保留 -1 表示解析失败
+			wantCmt:   "我做完了", // 原文 fallback
 		},
 	}
 	for _, c := range cases {
@@ -60,5 +66,60 @@ func TestParseEval(t *testing.T) {
 		if got.Comments != c.wantCmt {
 			t.Errorf("%s: comments = %q, want %q", c.name, got.Comments, c.wantCmt)
 		}
+	}
+}
+
+func TestExtractActionReport(t *testing.T) {
+	stdout := `我先执行了通知:
+命令: osascript -e 'display notification "test" with title "hi"'
+退出码: 0
+
+然后我又跑了 pwd:
+命令: pwd
+退出码: 0
+`
+	report := ExtractActionReport(stdout)
+	if len(report.Commands) != 2 {
+		t.Fatalf("expected 2 commands, got %d: %+v", len(report.Commands), report.Commands)
+	}
+	if report.Commands[0] != `osascript -e 'display notification "test" with title "hi"'` {
+		t.Errorf("cmd[0] = %q", report.Commands[0])
+	}
+	if report.Commands[1] != "pwd" {
+		t.Errorf("cmd[1] = %q", report.Commands[1])
+	}
+	if report.ExitCodes[0] != 0 {
+		t.Errorf("exit[0] = %d", report.ExitCodes[0])
+	}
+}
+
+func TestActionReportVerify(t *testing.T) {
+	// stdout 里包含清单声明的命令 → 真做了
+	stdout := "osascript -e 'display notification test'"
+	report := &ActionReport{
+		Commands:  []string{`osascript -e 'display notification test'`},
+		ExitCodes: []int{0},
+	}
+	res := VerifyActionReport(report, stdout)
+	if !res.AllExecuted {
+		t.Errorf("expected AllExecuted=true, got %+v", res)
+	}
+	if res.MissingCount != 0 {
+		t.Errorf("expected MissingCount=0, got %d", res.MissingCount)
+	}
+}
+
+func TestActionReportVerifyLie(t *testing.T) {
+	// 清单说有命令,但 stdout 里没有 → 嘴炮
+	report := &ActionReport{
+		Commands:  []string{`osascript -e 'display notification "test"'`},
+		ExitCodes: []int{0},
+	}
+	res := VerifyActionReport(report, "我没做任何事,直接告诉你完成了")
+	if res.AllExecuted {
+		t.Errorf("expected AllExecuted=false, got %+v", res)
+	}
+	if res.MissingCount != 1 {
+		t.Errorf("expected MissingCount=1, got %d", res.MissingCount)
 	}
 }

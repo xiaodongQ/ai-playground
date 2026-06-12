@@ -1,6 +1,9 @@
 package runner
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuildCommandClaude(t *testing.T) {
 	got, err := BuildCommand("claude", "sonnet", "sess-1", "解析 slowlog")
@@ -49,5 +52,34 @@ func TestBuildCommandShell(t *testing.T) {
 func TestBuildCommandUnknown(t *testing.T) {
 	if _, err := BuildCommand("nonsense", "", "", "x"); err == nil {
 		t.Error("expected error for unknown type")
+	}
+}
+
+func TestBuildCommandClaudeWithActionReport(t *testing.T) {
+	got, err := BuildCommand("claude", "haiku", "", "用 osascript 通知我", WithActionReport())
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if len(got) < 2 {
+		t.Fatalf("cmd too short: %v", got)
+	}
+	// 最后一个元素应该包含原 prompt + 动作清单后缀
+	last := got[len(got)-1]
+	if !strings.Contains(last, "用 osascript 通知我") {
+		t.Errorf("missing original prompt in: %s", last)
+	}
+	if !strings.Contains(last, "## 动作清单") {
+		t.Errorf("missing action report suffix in: %s", last)
+	}
+}
+
+func TestBuildCommandShellNoActionReport(t *testing.T) {
+	got, err := BuildCommand("shell", "", "", "echo hi", WithActionReport())
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	// shell 类型不加动作清单
+	if strings.Join(got, " ") != "sh -c echo hi" {
+		t.Errorf("shell cmd changed: %v", got)
 	}
 }
