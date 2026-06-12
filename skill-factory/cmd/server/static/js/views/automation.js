@@ -107,7 +107,7 @@ async function loadScheduled() {
       <td style="font-size:11px;color:var(--text-secondary)">${lastRun}</td>
       <td>
         <button class="${toggleBtnClass}" onclick="toggleScheduled('${s.id}', ${s.enabled})" title="${s.enabled ? '停止调度' : '启用调度'}">${toggleLabel}</button>
-        <button class="btn btn-small" onclick="runScheduled('${s.id}')">▶ 跑</button>
+        <button class="btn btn-small" onclick="runScheduled('${s.id}')">▶ 执行</button>
         <button class="btn btn-small" onclick="deleteScheduled('${s.id}')">删除</button>
       </td>
     </tr>`;
