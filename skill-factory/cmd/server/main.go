@@ -1,0 +1,1036 @@
+package main
+
+import (
+	"context"
+	"embed"
+	"encoding/json"
+	"log"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+	"skill-factory/internal/backend"
+	"skill-factory/internal/evaluator"
+	"skill-factory/internal/executor"
+	"skill-factory/internal/executor/runner"
+	"skill-factory/internal/hub"
+	"skill-factory/internal/scheduler"
+	"skill-factory/internal/shortcuts"
+	"skill-factory/internal/todo"
+	"skill-factory/internal/wsmsg"
+)
+
+//go:embed index.html static
+var FS embed.FS
+
+type APIServer struct {
+	db     *backend.TaskRepo
+	expDB  *backend.ExperienceRepo
+	execDB *backend.ExecutionRepo
+	linkDB *backend.WebLinkRepo
+	dirDB  *backend.DirShortcutRepo
+	schedDB *backend.ScheduledTaskRepo
+	setDB  *backend.AppSettingsRepo
+	evalDB *backend.EvaluationRepo
+	sch    *scheduler.Scheduler
+	hub    *hub.Hub
+	mux    *http.ServeMux
+
+	// 进程内运行中的执行（task_id → cancel func）
+	mu      sync.Mutex
+	running map[string]context.CancelFunc
+}
+
+func NewAPIServer(
+	db *backend.TaskRepo, expDB *backend.ExperienceRepo, execDB *backend.ExecutionRepo,
+	linkDB *backend.WebLinkRepo, dirDB *backend.DirShortcutRepo,
+	schedDB *backend.ScheduledTaskRepo, setDB *backend.AppSettingsRepo,
+	evalDB *backend.EvaluationRepo, sch *scheduler.Scheduler, h *hub.Hub,
+) *APIServer {
+	s := &APIServer{
+		db: db, expDB: expDB, execDB: execDB,
+		linkDB: linkDB, dirDB: dirDB, schedDB: schedDB, setDB: setDB, evalDB: evalDB,
+		sch: sch, hub: h,
+		mux: http.NewServeMux(), running: map[string]context.CancelFunc{},
+	}
+	s.routes()
+	return s
+}
+
+func (s *APIServer) routes() {
+	mux := s.mux
+	mux.HandleFunc("GET /api/tasks", s.handleTasks)
+	mux.HandleFunc("POST /api/tasks", s.handleTaskCreate)
+	mux.HandleFunc("GET /api/tasks/{id}", s.handleTaskGet)
+	mux.HandleFunc("PUT /api/tasks/{id}/status", s.handleTaskStatus)
+	mux.HandleFunc("POST /api/tasks/{id}/unclaim", s.handleTaskUnclaim)
+	mux.HandleFunc("POST /api/tasks/{id}/run", s.handleTaskRun)
+	mux.HandleFunc("POST /api/tasks/{id}/cancel", s.handleTaskCancel)
+	mux.HandleFunc("GET /api/tasks/{id}/executions", s.handleTaskExecutions)
+	mux.HandleFunc("GET /api/executions", s.handleExecutionsRecent)
+	mux.HandleFunc("GET /api/executions/{id}", s.handleExecutionGet)
+	mux.HandleFunc("POST /api/executions/{id}/evaluate", s.handleExecutionEvaluate)
+	mux.HandleFunc("GET /api/executions/{id}/evaluations", s.handleExecutionEvaluations)
+	mux.HandleFunc("GET /api/experiences", s.handleExperiences)
+	mux.HandleFunc("POST /api/experiences", s.handleExpCreate)
+	mux.HandleFunc("GET /api/experiences/{id}", s.handleExpGet)
+	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /api/pty", handlePty)
+	mux.HandleFunc("GET /ws", s.handleWS)
+	// /static/* 用 embed.FS serve 拆分 CSS/JS 文件
+	mux.Handle("GET /static/", http.FileServer(http.FS(FS)))
+	mux.HandleFunc("GET /", s.handleIndex)
+
+	// 5 个新功能
+	mux.HandleFunc("GET /api/web-links", s.handleWebLinks)
+	mux.HandleFunc("POST /api/web-links", s.handleWebLinkCreate)
+	mux.HandleFunc("PUT /api/web-links/{id}", s.handleWebLinkUpdate)
+	mux.HandleFunc("DELETE /api/web-links/{id}", s.handleWebLinkDelete)
+
+	mux.HandleFunc("GET /api/dir-shortcuts", s.handleDirShortcuts)
+	mux.HandleFunc("POST /api/dir-shortcuts", s.handleDirShortcutCreate)
+	mux.HandleFunc("PUT /api/dir-shortcuts/{id}", s.handleDirShortcutUpdate)
+	mux.HandleFunc("DELETE /api/dir-shortcuts/{id}", s.handleDirShortcutDelete)
+	mux.HandleFunc("POST /api/dir-shortcuts/{id}/open", s.handleDirShortcutOpen)
+
+	mux.HandleFunc("GET /api/scheduled", s.handleScheduledList)
+	mux.HandleFunc("POST /api/scheduled", s.handleScheduledCreate)
+	mux.HandleFunc("GET /api/scheduled/{id}", s.handleScheduledGet)
+	mux.HandleFunc("PUT /api/scheduled/{id}", s.handleScheduledUpdate)
+	mux.HandleFunc("DELETE /api/scheduled/{id}", s.handleScheduledDelete)
+	mux.HandleFunc("POST /api/scheduled/{id}/run-now", s.handleScheduledRunNow)
+
+	mux.HandleFunc("POST /api/scheduler/start", s.handleSchedulerStart)
+	mux.HandleFunc("POST /api/scheduler/stop", s.handleSchedulerStop)
+	mux.HandleFunc("GET /api/scheduler/status", s.handleSchedulerStatus)
+	mux.HandleFunc("POST /api/scheduler/reload", s.handleSchedulerReload)
+
+	mux.HandleFunc("GET /api/todo", s.handleTodo)
+	mux.HandleFunc("POST /api/todo", s.handleTodoAdd)
+	mux.HandleFunc("PUT /api/todo/{line_no}", s.handleTodoToggle)
+	mux.HandleFunc("DELETE /api/todo/{line_no}", s.handleTodoDelete)
+	mux.HandleFunc("GET /api/todo/path", s.handleTodoPath)
+	mux.HandleFunc("PUT /api/todo/path", s.handleTodoPathSet)
+
+	mux.HandleFunc("GET /api/settings", s.handleSettingsList)
+	mux.HandleFunc("PUT /api/settings/{key}", s.handleSettingsSet)
+}
+
+func (s *APIServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mux.ServeHTTP(w, r)
+}
+
+// Tasks
+
+func (s *APIServer) handleTasks(w http.ResponseWriter, r *http.Request) {
+	status := r.URL.Query().Get("status")
+	offset := parseInt(r.URL.Query().Get("offset"), 0)
+	limit := parseInt(r.URL.Query().Get("limit"), 50)
+
+	tasks, err := s.db.List(backend.TaskFilter{Status: status, Offset: offset, Limit: limit})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, tasks)
+}
+
+func (s *APIServer) handleTaskCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title        string `json:"title"`
+		Description string `json:"description"`
+		ExperienceID string `json:"experience_id"`
+		Resources   string `json:"resources"`
+		Acceptance  string `json:"acceptance"`
+		Module string `json:"module"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	task := &backend.Task{
+		ID:           uuid.New().String(),
+		Title:        req.Title,
+		Description:  req.Description,
+		ExperienceID: req.ExperienceID,
+		Resources:    req.Resources,
+		Acceptance:   req.Acceptance,
+		Status:       backend.TaskStatusPending,
+		Version:      "v0.0.1",
+		CreatedAt:    time.Now(),
+	}
+	if err := s.db.Create(task); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, task)
+}
+
+func (s *APIServer) handleTaskGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	task, err := s.db.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, task)
+}
+
+func (s *APIServer) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Status string            `json:"status"`
+		Maintainer string            `json:"maintainer"`
+		Result     *backend.TaskResult `json:"result,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Status != backend.TaskStatusPending &&
+		req.Status != backend.TaskStatusInProgress &&
+		req.Status != backend.TaskStatusArchived &&
+		req.Status != backend.TaskStatusException {
+		writeErr(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	if req.Maintainer == "" {
+		req.Maintainer = "factory-agent"
+	}
+	if err := s.db.UpdateStatus(id, req.Status, req.Maintainer); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	task, _ := s.db.Get(id)
+	writeJSON(w, task)
+}
+
+// Experiences
+
+func (s *APIServer) handleExperiences(w http.ResponseWriter, r *http.Request) {
+	module := r.URL.Query().Get("module")
+	list, err := s.expDB.Search(module)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, list)
+}
+
+func (s *APIServer) handleExpCreate(w http.ResponseWriter, r *http.Request) {
+	var exp backend.Experience
+	if err := json.NewDecoder(r.Body).Decode(&exp); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	exp.ID = uuid.New().String()
+	exp.Version = "v1.0.0"
+	exp.CreatedAt = time.Now()
+	exp.UpdatedAt = time.Now()
+	if err := s.expDB.Create(&exp); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, exp)
+}
+
+func (s *APIServer) handleExpGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	exp, err := s.expDB.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, exp)
+}
+
+// Stats
+
+func (s *APIServer) handleStats(w http.ResponseWriter, r *http.Request) {
+	type Stats struct {
+		TotalTasks       int `json:"total_tasks"`
+		PendingTasks     int `json:"pending_tasks"`
+		InProgressTasks  int `json:"in_progress_tasks"`
+		ArchivedTasks int `json:"archived_tasks"`
+		ExceptionTasks   int `json:"exception_tasks"`
+		TotalExp         int `json:"total_exp"`
+	}
+	all, _ := s.db.List(backend.TaskFilter{Limit: 10000, Offset: 0})
+	st := Stats{TotalTasks: len(all)}
+	for _, t := range all {
+		switch t.Status {
+		case backend.TaskStatusPending: st.PendingTasks++
+		case backend.TaskStatusInProgress: st.InProgressTasks++
+		case backend.TaskStatusArchived: st.ArchivedTasks++
+		case backend.TaskStatusException: st.ExceptionTasks++
+		}
+	}
+	exps, _ := s.expDB.Search("")
+	st.TotalExp = len(exps)
+	writeJSON(w, st)
+}
+
+// Task execution
+
+// handleTaskRun 立即执行一次任务。command_type 暂默认 "shell"，prompt 来自 task.description。
+// 真正"AI 任务"用法需要 experience_id 关联或 task 上预置 command_type/model——本阶段只跑通链路。
+func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	task, err := s.db.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	var req struct {
+		CommandType string `json:"command_type"`
+		Model       string `json:"model"`
+		Prompt      string `json:"prompt"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // body 可选
+	if req.CommandType == "" {
+		req.CommandType = "shell"
+	}
+	if req.Prompt == "" {
+		req.Prompt = task.Description
+	}
+	if req.Prompt == "" {
+		req.Prompt = task.Title
+	}
+
+	cmd, err := runner.BuildCommand(req.CommandType, req.Model, "", req.Prompt)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// 写 executions 行
+	exec := &backend.Execution{
+		ID:        uuid.New().String(),
+		TaskID:    id,
+		Source:    "manual",
+		Command:   runner.CmdString(cmd),
+		Model:     req.Model,
+		StartedAt: time.Now(),
+	}
+	if err := s.execDB.Create(exec); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.db.UpdateStatus(id, backend.TaskStatusInProgress, "factory-agent")
+
+	// 异步跑
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	s.mu.Lock()
+	s.running[id] = cancel
+	s.mu.Unlock()
+	go func() {
+		defer func() {
+			s.mu.Lock()
+			delete(s.running, id)
+			s.mu.Unlock()
+		}()
+		res, _ := executor.Run(ctx, cmd, func(chunk string) {
+			s.hub.Broadcast(wsmsg.ChannelExec, map[string]any{
+				"execution_id": exec.ID,
+				"task_id":      id,
+				"chunk":        chunk,
+			})
+		})
+		status := backend.TaskStatusArchived
+		if res != nil && res.ExitCode != 0 {
+			status = backend.TaskStatusException
+		}
+		out, errOut := "", ""
+		exitCode := -1
+		if res != nil {
+			out, errOut = res.Output, res.ErrorOut
+			exitCode = res.ExitCode
+		}
+		_ = s.execDB.Finish(exec.ID, out, errOut, exitCode)
+		_ = s.db.UpdateStatus(id, status, "factory-agent")
+		s.hub.Broadcast(wsmsg.ChannelExec, map[string]any{
+			"execution_id": exec.ID,
+			"task_id":      id,
+			"done":         true,
+			"exit_code":    exitCode,
+		})
+	}()
+
+	writeJSON(w, map[string]any{
+		"execution_id": exec.ID,
+		"task_id":      id,
+		"command":      exec.Command,
+		"status":       "started",
+	})
+}
+
+func (s *APIServer) handleTaskUnclaim(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.db.UpdateStatus(id, backend.TaskStatusPending, ""); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"id": id, "status": "pending"})
+}
+
+func (s *APIServer) handleTaskCancel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.mu.Lock()
+	cancel, ok := s.running[id]
+	s.mu.Unlock()
+	if !ok {
+		writeErr(w, http.StatusNotFound, "no running execution for task")
+		return
+	}
+	cancel()
+	writeJSON(w, map[string]any{"task_id": id, "cancelled": true})
+}
+
+func (s *APIServer) handleTaskExecutions(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	list, err := s.execDB.ListByTask(id, 50)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if list == nil {
+		list = []*backend.Execution{}
+	}
+	writeJSON(w, list)
+}
+
+func (s *APIServer) handleExecutionsRecent(w http.ResponseWriter, r *http.Request) {
+	limit := parseInt(r.URL.Query().Get("limit"), 50)
+	list, err := s.execDB.ListRecent(limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if list == nil {
+		list = []*backend.Execution{}
+	}
+	writeJSON(w, list)
+}
+
+func (s *APIServer) handleExecutionGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	exec, err := s.execDB.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, exec)
+}
+
+// handleExecutionEvaluate 异步调 claude 给 execution 打分。
+func (s *APIServer) handleExecutionEvaluate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	exec, err := s.execDB.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	var req struct {
+		Model string `json:"model"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Model == "" {
+		req.Model = "haiku"
+	}
+	// 找 task prompt：优先 task.description，否则用 prompt 字段
+	prompt := exec.Command
+	if exec.TaskID != "" {
+		if t, err := s.db.Get(exec.TaskID); err == nil {
+			prompt = "任务标题: " + t.Title + "\n任务描述: " + t.Description
+		}
+	}
+	// 异步执行（避免 HTTP 阻塞 30s+）
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		_, err := evaluator.RunAndSave(ctx, s.evalDB, s.execDB, exec, prompt, req.Model)
+		if err != nil {
+			log.Printf("evaluator: %v", err)
+		}
+	}()
+	writeJSON(w, map[string]string{"execution_id": id, "status": "evaluating", "model": req.Model})
+}
+
+func (s *APIServer) handleExecutionEvaluations(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	list, err := s.evalDB.ListByExecution(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if list == nil {
+		list = []*backend.Evaluation{}
+	}
+	writeJSON(w, list)
+}
+
+// WebSocket
+
+var wsUpgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin:     func(r *http.Request) bool { return true },
+}
+
+func (s *APIServer) handleWS(w http.ResponseWriter, r *http.Request) {
+	conn, err := wsUpgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ws upgrade: %v", err)
+		return
+	}
+	s.hub.Register(conn)
+	// 简单读循环：忽略客户端消息，只用来检测断开
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			s.hub.Unregister(conn)
+			return
+		}
+	}
+}
+
+// Index
+
+func (s *APIServer) handleIndex(w http.ResponseWriter, r *http.Request) {
+	data, err := FS.ReadFile("index.html")
+	if err != nil {
+		http.Error(w, "UI not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(data)
+}
+
+// ===== 5 个新功能 handler =====
+
+// --- Web Links ---
+
+func (s *APIServer) handleWebLinks(w http.ResponseWriter, r *http.Request) {
+	list, err := s.linkDB.List()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if list == nil {
+		list = []*backend.WebLink{}
+	}
+	writeJSON(w, list)
+}
+
+func (s *APIServer) handleWebLinkCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name      string `json:"name"`
+		URL       string `json:"url"`
+		IconURL   string `json:"icon_url"`
+		SortOrder int    `json:"sort_order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Name == "" || req.URL == "" {
+		writeErr(w, http.StatusBadRequest, "name and url are required")
+		return
+	}
+	link := &backend.WebLink{
+		ID:        uuid.New().String(),
+		Name:      req.Name,
+		URL:       req.URL,
+		IconURL:   req.IconURL,
+		SortOrder: req.SortOrder,
+		CreatedAt: time.Now(),
+	}
+	if err := s.linkDB.Create(link); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, link)
+}
+
+func (s *APIServer) handleWebLinkUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Name      string `json:"name"`
+		URL       string `json:"url"`
+		IconURL   string `json:"icon_url"`
+		SortOrder int    `json:"sort_order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	link := &backend.WebLink{ID: id, Name: req.Name, URL: req.URL, IconURL: req.IconURL, SortOrder: req.SortOrder}
+	if err := s.linkDB.Update(link); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, link)
+}
+
+func (s *APIServer) handleWebLinkDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.linkDB.Delete(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"id": id, "status": "deleted"})
+}
+
+// --- Dir Shortcuts ---
+
+func (s *APIServer) handleDirShortcuts(w http.ResponseWriter, r *http.Request) {
+	list, err := s.dirDB.List()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if list == nil {
+		list = []*backend.DirShortcut{}
+	}
+	writeJSON(w, list)
+}
+
+func (s *APIServer) handleDirShortcutCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name      string `json:"name"`
+		Path      string `json:"path"`
+		SortOrder int    `json:"sort_order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Name == "" || req.Path == "" {
+		writeErr(w, http.StatusBadRequest, "name and path are required")
+		return
+	}
+	d := &backend.DirShortcut{
+		ID:        uuid.New().String(),
+		Name:      req.Name,
+		Path:      req.Path,
+		SortOrder: req.SortOrder,
+		CreatedAt: time.Now(),
+	}
+	if err := s.dirDB.Create(d); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, d)
+}
+
+func (s *APIServer) handleDirShortcutUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Name      string `json:"name"`
+		Path      string `json:"path"`
+		SortOrder int    `json:"sort_order"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d := &backend.DirShortcut{ID: id, Name: req.Name, Path: req.Path, SortOrder: req.SortOrder}
+	if err := s.dirDB.Update(d); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, d)
+}
+
+func (s *APIServer) handleDirShortcutDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.dirDB.Delete(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"id": id, "status": "deleted"})
+}
+
+func (s *APIServer) handleDirShortcutOpen(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	// 取 path
+	list, err := s.dirDB.List()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var path string
+	for _, d := range list {
+		if d.ID == id {
+			path = d.Path
+			break
+		}
+	}
+	if path == "" {
+		writeErr(w, http.StatusNotFound, "shortcut not found")
+		return
+	}
+	if err := shortcuts.OpenDir(path); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	_ = s.dirDB.Touch(id)
+	writeJSON(w, map[string]string{"id": id, "status": "opened", "path": path})
+}
+
+// --- Scheduled Tasks ---
+
+func (s *APIServer) handleScheduledList(w http.ResponseWriter, r *http.Request) {
+	list, err := s.schedDB.List()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if list == nil {
+		list = []*backend.ScheduledTask{}
+	}
+	writeJSON(w, list)
+}
+
+func (s *APIServer) handleScheduledGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	t, err := s.schedDB.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, t)
+}
+
+func (s *APIServer) handleScheduledCreate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name        string `json:"name"`
+		CronExpr    string `json:"cron_expr"`
+		CommandType string `json:"command_type"`
+		Model       string `json:"model"`
+		Prompt      string `json:"prompt"`
+		WorkingDir  string `json:"working_dir"`
+		Enabled     bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Name == "" || req.CronExpr == "" || req.CommandType == "" {
+		writeErr(w, http.StatusBadRequest, "name, cron_expr, command_type are required")
+		return
+	}
+	t := &backend.ScheduledTask{
+		ID:          uuid.New().String(),
+		Name:        req.Name,
+		CronExpr:    req.CronExpr,
+		CommandType: req.CommandType,
+		Model:       req.Model,
+		Prompt:      req.Prompt,
+		WorkingDir:  req.WorkingDir,
+		Enabled:     req.Enabled,
+		CreatedAt:   time.Now(),
+	}
+	if err := s.schedDB.Create(t); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.sch.Reload() // 热加载
+	writeJSON(w, t)
+}
+
+func (s *APIServer) handleScheduledUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Name        string `json:"name"`
+		CronExpr    string `json:"cron_expr"`
+		CommandType string `json:"command_type"`
+		Model       string `json:"model"`
+		Prompt      string `json:"prompt"`
+		WorkingDir  string `json:"working_dir"`
+		Enabled     bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	t := &backend.ScheduledTask{
+		ID:          id,
+		Name:        req.Name,
+		CronExpr:    req.CronExpr,
+		CommandType: req.CommandType,
+		Model:       req.Model,
+		Prompt:      req.Prompt,
+		WorkingDir:  req.WorkingDir,
+		Enabled:     req.Enabled,
+	}
+	if err := s.schedDB.Update(t); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.sch.Reload()
+	writeJSON(w, t)
+}
+
+func (s *APIServer) handleScheduledDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.schedDB.Delete(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	_ = s.sch.Reload()
+	writeJSON(w, map[string]string{"id": id, "status": "deleted"})
+}
+
+func (s *APIServer) handleScheduledRunNow(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if _, err := s.sch.RunNow(id); err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"id": id, "status": "triggered"})
+}
+
+// --- Scheduler ---
+
+func (s *APIServer) handleSchedulerStart(w http.ResponseWriter, r *http.Request) {
+	if err := s.sch.Start(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"status": "running"})
+}
+
+func (s *APIServer) handleSchedulerStop(w http.ResponseWriter, r *http.Request) {
+	s.sch.Stop()
+	writeJSON(w, map[string]string{"status": "stopped"})
+}
+
+func (s *APIServer) handleSchedulerStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{
+		"running": s.sch.IsRunning(),
+	})
+}
+
+func (s *APIServer) handleSchedulerReload(w http.ResponseWriter, r *http.Request) {
+	if err := s.sch.Reload(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"status": "reloaded"})
+}
+
+// --- Todo.md ---
+
+func (s *APIServer) handleTodo(w http.ResponseWriter, r *http.Request) {
+	path, _ := s.setDB.Get("todo_md_path")
+	if path == "" {
+		writeJSON(w, map[string]any{"path": "", "items": []todo.Item{}})
+		return
+	}
+	items, err := todo.ReadAndParse(path)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if items == nil {
+		items = []todo.Item{}
+	}
+	writeJSON(w, map[string]any{"path": path, "items": items})
+}
+
+func (s *APIServer) handleTodoToggle(w http.ResponseWriter, r *http.Request) {
+	path, _ := s.setDB.Get("todo_md_path")
+	if path == "" {
+		writeErr(w, http.StatusBadRequest, "todo_md_path not set")
+		return
+	}
+	lineNo := parseInt(r.PathValue("line_no"), 0)
+	if lineNo <= 0 {
+		writeErr(w, http.StatusBadRequest, "invalid line_no")
+		return
+	}
+	var req struct {
+		Done bool `json:"done"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req) // body 可选，未传则保持原状
+	items, err := todo.ReadAndParse(path)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	var found bool
+	for i := range items {
+		if items[i].LineNo == lineNo {
+			items[i].Done = req.Done
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeErr(w, http.StatusNotFound, "line not found")
+		return
+	}
+	if err := todo.ToggleAndWrite(path, items); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"line_no": lineNo, "done": req.Done})
+}
+
+func (s *APIServer) handleTodoAdd(w http.ResponseWriter, r *http.Request) {
+	path, _ := s.setDB.Get("todo_md_path")
+	if path == "" {
+		writeErr(w, http.StatusBadRequest, "todo_md_path not set")
+		return
+	}
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Text == "" {
+		writeErr(w, http.StatusBadRequest, "text is required")
+		return
+	}
+	if err := todo.AddAndWrite(path, req.Text); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"text": req.Text, "status": "added"})
+}
+
+func (s *APIServer) handleTodoDelete(w http.ResponseWriter, r *http.Request) {
+	path, _ := s.setDB.Get("todo_md_path")
+	if path == "" {
+		writeErr(w, http.StatusBadRequest, "todo_md_path not set")
+		return
+	}
+	lineNo := parseInt(r.PathValue("line_no"), 0)
+	if lineNo <= 0 {
+		writeErr(w, http.StatusBadRequest, "invalid line_no")
+		return
+	}
+	if err := todo.DeleteAndWrite(path, lineNo); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"line_no": lineNo, "status": "deleted"})
+}
+
+func (s *APIServer) handleTodoPath(w http.ResponseWriter, r *http.Request) {
+	path, _ := s.setDB.Get("todo_md_path")
+	writeJSON(w, map[string]string{"path": path})
+}
+
+func (s *APIServer) handleTodoPathSet(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.setDB.Set("todo_md_path", req.Path); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"path": req.Path})
+}
+
+// --- Settings ---
+
+func (s *APIServer) handleSettingsList(w http.ResponseWriter, r *http.Request) {
+	all, err := s.setDB.All()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, all)
+}
+
+func (s *APIServer) handleSettingsSet(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	var req struct {
+		Value string `json:"value"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.setDB.Set(key, req.Value); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"key": key, "value": req.Value})
+}
+
+// Helpers
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func parseInt(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	var n int
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return def
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
+func main() {
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "skill-factory.db"
+	}
+
+	db, err := backend.OpenDB(dbPath)
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	if err := backend.InitSchema(db); err != nil {
+		log.Fatalf("init schema: %v", err)
+	}
+
+	taskRepo := backend.NewTaskRepo(db)
+	expRepo := backend.NewExperienceRepo(db)
+	execRepo := backend.NewExecutionRepo(db)
+	linkRepo := backend.NewWebLinkRepo(db)
+	dirRepo := backend.NewDirShortcutRepo(db)
+	schedRepo := backend.NewScheduledTaskRepo(db)
+	settingsRepo := backend.NewAppSettingsRepo(db)
+	evalRepo := backend.NewEvaluationRepo(db)
+	h := hub.New()
+	sch := scheduler.New(schedRepo, execRepo, h)
+	srv := NewAPIServer(taskRepo, expRepo, execRepo,
+		linkRepo, dirRepo, schedRepo, settingsRepo, evalRepo, sch, h)
+
+	addr := os.Getenv("ADDR")
+	if addr == "" {
+		addr = ":8080"
+	}
+	log.Printf("Skill Factory started at http://localhost%s", addr)
+	if err := http.ListenAndServe(addr, srv); err != nil {
+		log.Fatal(err)
+	}
+}

@@ -1,0 +1,306 @@
+// Tasks Tab：列表 + 状态过滤 + 认领/归档 + task modal（新建/查看/编辑）
+// 依赖 api.js
+
+let tasks = [];
+
+// ===== 多选经验库（exp picker） =====
+// _selectedExps: [{id, module, scene, keywords}]
+let _selectedExps = [];
+let _allExpsCache = null; // 缓存全量经验库
+
+async function _loadAllExps() {
+  if (_allExpsCache) return _allExpsCache;
+  _allExpsCache = await fetchJSON('/api/experiences');
+  return _allExpsCache;
+}
+
+async function openExpPicker() {
+  // 初始填充：已选 + 全部
+  const all = await _loadAllExps();
+  _renderExpPickerList(all, '');
+  document.getElementById('exp-picker-search').value = '';
+  document.getElementById('exp-picker-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('exp-picker-search').focus(), 50);
+}
+
+function _renderExpPickerList(all, keyword) {
+  const kw = (keyword || '').toLowerCase();
+  const filtered = kw
+    ? all.filter(e => (e.module || '').toLowerCase().includes(kw)
+                   || (e.scene || '').toLowerCase().includes(kw)
+                   || (e.keywords || '').toLowerCase().includes(kw))
+    : all;
+  const selectedIds = new Set(_selectedExps.map(s => s.id));
+  document.getElementById('exp-picker-list').innerHTML = filtered.length === 0
+    ? '<div class="chip-empty" style="padding:20px">无匹配</div>'
+    : filtered.map(e => {
+        const checked = selectedIds.has(e.id) ? 'checked' : '';
+        const selected = selectedIds.has(e.id) ? ' selected' : '';
+        return `<label class="exp-picker-item${selected}">
+          <input type="checkbox" data-exp-id="${e.id}" ${checked}>
+          <div style="flex:1">
+            <div><span class="ep-module">${esc(e.module)}</span><span class="ep-id">${e.id.slice(0, 8)}</span></div>
+            ${e.scene ? `<div class="ep-scene">${esc(e.scene)}</div>` : ''}
+            ${e.keywords ? `<div class="ep-kw">🏷 ${esc(e.keywords)}</div>` : ''}
+          </div>
+        </label>`;
+      }).join('');
+  _updateExpPickerCount();
+  // 绑定 change 事件
+  document.querySelectorAll('#exp-picker-list input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', e => {
+      const id = e.target.dataset.expId;
+      const exp = all.find(x => x.id === id);
+      if (!exp) return;
+      if (e.target.checked) {
+        if (!_selectedExps.find(s => s.id === id)) _selectedExps.push({id, module: exp.module, scene: exp.scene, keywords: exp.keywords});
+      } else {
+        _selectedExps = _selectedExps.filter(s => s.id !== id);
+      }
+      e.target.closest('.exp-picker-item').classList.toggle('selected', e.target.checked);
+      _updateExpPickerCount();
+    });
+  });
+}
+
+function _updateExpPickerCount() {
+  document.getElementById('exp-picker-count').textContent = `已选 ${_selectedExps.length} 条`;
+}
+
+document.getElementById('exp-picker-search').addEventListener('input', debounce(async e => {
+  const all = await _loadAllExps();
+  _renderExpPickerList(all, e.target.value);
+}, 200));
+
+function closeExpPicker() { document.getElementById('exp-picker-modal').classList.add('hidden'); }
+function confirmExpPicker() {
+  renderTaskExpChips();
+  closeExpPicker();
+}
+
+// 渲染任务 modal 内的已选 chip
+function renderTaskExpChips() {
+  const el = document.getElementById('task-exps-list');
+  if (_selectedExps.length === 0) {
+    el.innerHTML = '<span class="chip-empty">未选</span>';
+    return;
+  }
+  el.innerHTML = _selectedExps.map(s => {
+    const text = s.scene || s.module || '';
+    return `<span class="chip" data-exp-id="${s.id}">
+      <span class="chip-id">${s.id.slice(0, 8)}</span>
+      <span class="chip-text">${esc(text)}</span>
+      <span class="chip-del" onclick="removeExpFromTask('${s.id}')" title="移除">×</span>
+    </span>`;
+  }).join('');
+}
+
+function removeExpFromTask(id) {
+  _selectedExps = _selectedExps.filter(s => s.id !== id);
+  renderTaskExpChips();
+}
+
+async function loadTasks() {
+  const status = document.getElementById('filter-status').value;
+  const url = API + '/api/tasks' + (status ? '?status=' + status : '');
+  console.log('[loadTasks] url=', url, 'task-list el:', !!document.getElementById('task-list'));
+  try {
+    tasks = await fetchJSON(url);
+    console.log('[loadTasks] got', tasks.length, 'tasks');
+    renderTaskTable(tasks);
+  } catch(e) { console.error('[loadTasks] err:', e); }
+}
+
+function renderTaskTable(list) {
+  const el = document.getElementById('task-list');
+  if (!list || list.length === 0) {
+    el.innerHTML = '<div class="empty">暂无任务</div>';
+    document.getElementById('task-count').textContent = '0 条任务';
+    return;
+  }
+  document.getElementById('task-count').textContent = list.length + ' 条任务';
+  el.innerHTML = `<table>
+    <thead><tr><th>标题</th><th>状态</th><th>版本</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody>${list.map(t => {
+      // 按状态分按钮
+      const ops = taskOpsByStatus(t);
+      return `
+      <tr>
+        <td>
+          <div class="task-title-cell">
+            <div class="title">${esc(t.title)}</div>
+            ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ''}
+          </div>
+        </td>
+        <td>${statusTag(t.status)}</td>
+        <td style="color:var(--text-secondary);font-size:12px">${esc(t.version || '-')}</td>
+        <td style="color:var(--text-secondary);font-size:12px">${fmt(t.created_at)}</td>
+        <td>
+          <button class="btn btn-secondary btn-small" onclick="viewTask('${t.id}')">查看</button>
+          ${ops}
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+// 按状态返回操作按钮 HTML
+function taskOpsByStatus(t) {
+  const id = t.id;
+  switch (t.status) {
+    case 'pending':
+      return `
+        <button class="btn btn-warning btn-small" onclick="claimTask('${id}')" title="认领后：状态→in_progress，maintainer 标记为你，可以▶运行">🟡 认领</button>
+        <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')" title="直接归档（不需执行）">归档</button>
+      `;
+    case 'in_progress':
+      return `
+        <button class="btn btn-primary btn-small" onclick="runTask('${id}')" title="立即用 AI CLI 跑这个任务（流式输出在 /api/tasks/{id}/run）">▶ 运行</button>
+        <button class="btn btn-small" onclick="unclaimTask('${id}')" title="退回 pending（清空 maintainer/started_at）" style="background:#94a3b8;color:#fff">↩ 取消认领</button>
+        <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')">归档</button>
+      `;
+    case 'archived':
+      return `
+        <button class="btn btn-small" onclick="reopenTask('${id}')" title="归档→重新打开回到 pending">↻ 重新打开</button>
+      `;
+    case 'exception':
+      return `
+        <button class="btn btn-warning btn-small" onclick="reopenTask('${id}')" title="异常→重新打开回到 pending">↻ 重新打开</button>
+        <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')">归档</button>
+      `;
+    default:
+      return `<button class="btn btn-secondary btn-small" onclick="viewTask('${id}')">详情</button>`;
+  }
+}
+
+async function claimTask(id) {
+  await fetch(API + '/api/tasks/' + id + '/status', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({status: 'in_progress', maintainer: 'factory-agent'})
+  });
+  reloadCurrentTab();
+}
+
+async function unclaimTask(id) {
+  if (!confirm('确认取消认领？状态会回到 pending，清空 maintainer/started_at/heartbeat。')) return;
+  const r = await fetch(API + '/api/tasks/' + id + '/unclaim', {method:'POST'});
+  if (!r.ok) { const b = await r.json().catch(() => ({})); alert('取消认领失败：' + (b.error || r.statusText)); return; }
+  reloadCurrentTab();
+}
+
+async function reopenTask(id) {
+  if (!confirm('重新打开任务？状态会回到 pending。')) return;
+  // 调 update status（pending）
+  const r = await fetch(API + '/api/tasks/' + id + '/status', {
+    method: 'PUT', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({status: 'pending', maintainer: ''})
+  });
+  if (!r.ok) { const b = await r.json().catch(() => ({})); alert('重新打开失败：' + (b.error || r.statusText)); return; }
+  reloadCurrentTab();
+}
+
+async function runTask(id) {
+  if (!confirm('立即用 AI CLI 跑这个任务？流式输出会写入 executions 表。')) return;
+  try {
+    const r = await fetchJSON(API + '/api/tasks/' + id + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+    alert('已启动 execution_id=' + r.execution_id + '\n去"⚡ 自动化 Tab 最近执行"看流式输出');
+    reloadCurrentTab();
+  } catch (e) { alert('启动失败：' + e.message); }
+}
+
+async function archiveTask(id) {
+  await fetch(API + '/api/tasks/' + id + '/status', {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({status: 'archived'})
+  });
+  reloadCurrentTab();
+}
+
+function viewTask(id) {
+  const t = tasks.find(t => t.id === id);
+  if (!t) { loadTasks().then(() => viewTask(id)); return; }
+  document.getElementById('task-modal-title').textContent = '任务详情';
+  document.getElementById('task-id').value = t.id;
+  document.getElementById('task-title').value = t.title;
+  document.getElementById('task-title').readOnly = true;
+  document.getElementById('task-desc').value = t.description || '';
+  document.getElementById('task-desc').readOnly = true;
+  document.getElementById('task-module').value = t.module || '';
+  document.getElementById('task-module').readOnly = true;
+  document.getElementById('task-resources').value = t.resources || '';
+  document.getElementById('task-acceptance').value = t.acceptance || '';
+  document.getElementById('task-acceptance').readOnly = true;
+  document.getElementById('task-submit-btn').classList.add('hidden');
+  // 经验库：展示 chip 列表（不可编辑）
+  _selectedExps = [];
+  if (t.experience_id) {
+    const ids = t.experience_id.split(',').map(s => s.trim()).filter(Boolean);
+    _loadAllExps().then(all => {
+      _selectedExps = ids.map(eid => {
+        const e = all.find(x => x.id === eid) || {id: eid, module: '?', scene: ''};
+        return {id: eid, module: e.module, scene: e.scene, keywords: e.keywords};
+      });
+      renderTaskExpChips();
+    });
+  } else {
+    renderTaskExpChips();
+  }
+  document.getElementById('task-modal').classList.remove('hidden');
+}
+
+function showTaskModal(task) {
+  document.getElementById('task-modal-title').textContent = task ? '编辑任务' : '新建任务';
+  document.getElementById('task-id').value = '';
+  document.getElementById('task-title').value = '';
+  document.getElementById('task-title').readOnly = false;
+  document.getElementById('task-desc').value = '';
+  document.getElementById('task-desc').readOnly = false;
+  document.getElementById('task-module').value = '';
+  document.getElementById('task-module').readOnly = false;
+  document.getElementById('task-resources').value = '';
+  document.getElementById('task-acceptance').value = '';
+  document.getElementById('task-acceptance').readOnly = false;
+  document.getElementById('task-submit-btn').classList.remove('hidden');
+  // 经验库：编辑模式从 task.experience_id 解析
+  _selectedExps = [];
+  if (task && task.experience_id) {
+    const ids = task.experience_id.split(',').map(s => s.trim()).filter(Boolean);
+    _loadAllExps().then(all => {
+      _selectedExps = ids.map(id => {
+        const e = all.find(x => x.id === id) || {id, module: '?', scene: ''};
+        return {id, module: e.module, scene: e.scene, keywords: e.keywords};
+      }).filter(Boolean);
+      renderTaskExpChips();
+    });
+  } else {
+    renderTaskExpChips();
+  }
+  document.getElementById('task-modal').classList.remove('hidden');
+}
+
+function closeTaskModal() {
+  document.getElementById('task-modal').classList.add('hidden');
+}
+
+async function submitTask() {
+  const title = document.getElementById('task-title').value.trim();
+  if (!title) { alert('请输入标题'); return; }
+  const body = {
+    title,
+    description: document.getElementById('task-desc').value,
+    experience_id: _selectedExps.map(s => s.id).join(','),
+    module: document.getElementById('task-module').value,
+    resources: document.getElementById('task-resources').value,
+    acceptance: document.getElementById('task-acceptance').value
+  };
+  await fetch(API + '/api/tasks', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  closeTaskModal();
+  loadDashboard();
+  if (currentTab === 'tasks') loadTasks();
+}
