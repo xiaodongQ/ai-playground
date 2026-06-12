@@ -4,10 +4,12 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -281,11 +283,59 @@ func (s *APIServer) handleStats(w http.ResponseWriter, r *http.Request) {
 
 // Task execution
 
+// BuildTaskPrompt 用 task + experience 信息构建 Rich AI prompt。
+// 注入: title / description / resources / acceptance / priority / experience 内容。
+// experience 为 nil 时跳过经验库段落。
+func BuildTaskPrompt(t *backend.Task, exp *backend.Experience) string {
+	var b strings.Builder
+	b.WriteString("# 任务背景\n")
+	b.WriteString(fmt.Sprintf("## 任务标题\n%s\n", t.Title))
+	if t.Description != "" {
+		b.WriteString(fmt.Sprintf("## 任务描述\n%s\n", t.Description))
+	}
+	if t.Priority > 0 {
+		b.WriteString(fmt.Sprintf("## 优先级\n%d（1 低 5 高）\n", t.Priority))
+	}
+	if t.Resources != "" {
+		b.WriteString(fmt.Sprintf("## 资源/文档\n%s\n", t.Resources))
+	}
+	if t.Acceptance != "" {
+		b.WriteString(fmt.Sprintf("## 验收标准\n%s\n", t.Acceptance))
+	}
+	if exp != nil {
+		b.WriteString("# 相关经验库\n")
+		if exp.Module != "" {
+			b.WriteString(fmt.Sprintf("## 模块\n%s\n", exp.Module))
+		}
+		if exp.Scene != "" {
+			b.WriteString(fmt.Sprintf("## 场景\n%s\n", exp.Scene))
+		}
+		if exp.Keywords != "" {
+			b.WriteString(fmt.Sprintf("## 关键词\n%s\n", exp.Keywords))
+		}
+		if exp.ToolUsage != "" {
+			b.WriteString(fmt.Sprintf("## 工具用法\n%s\n", exp.ToolUsage))
+		}
+		if exp.LogSamples != "" {
+			b.WriteString(fmt.Sprintf("## 日志样例\n%s\n", exp.LogSamples))
+		}
+		if exp.CodeSnippets != "" {
+			b.WriteString(fmt.Sprintf("## 代码片段\n%s\n", exp.CodeSnippets))
+		}
+		if exp.LogPaths != "" {
+			b.WriteString(fmt.Sprintf("## 日志路径\n%s\n", exp.LogPaths))
+		}
+	}
+	b.WriteString("# 用户指令\n")
+	b.WriteString(t.Description)
+	return b.String()
+}
+
 // handleTaskRun 立即执行一次任务。command_type 默认 "claude"（让 AI CLI 解释
 // 执行 prompt），可显式传 "shell" / "cbc" 走其他 runner。prompt 必传或取自
 // task.description；不再 fallback 到 task.title（标题不是命令，避免
 // "两数之和: command not found" 之类的隐式错误）。prompt 仍空则报 400。
-// 真正"AI 任务"用法需要 experience_id 关联或 task 上预置 command_type/model——本阶段只跑通链路。
+// 知识库注入: title / description / resources / acceptance / priority / experience 内容全部注入。
 func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	task, err := s.db.Get(id)
@@ -302,18 +352,28 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 	if req.CommandType == "" {
 		req.CommandType = "claude"
 	}
-	if req.Prompt == "" {
-		req.Prompt = task.Description
+	// 构造 rich prompt: task 全字段 + experience 内容注入
+	var prompt string
+	if req.Prompt != "" {
+		// 显式传了 prompt 就用显式的(保留原有行为)
+		prompt = req.Prompt
+	} else {
+		// 没用 body.prompt,自动从 task + experience 组装
+		var exp *backend.Experience
+		if task.ExperienceID != "" {
+			exp, _ = s.expDB.Get(task.ExperienceID)
+		}
+		prompt = BuildTaskPrompt(task, exp)
+		if prompt == "" {
+			slog.Warn("task run rejected: empty prompt after BuildTaskPrompt",
+				slog.String("task_id", id),
+				slog.String("command_type", req.CommandType),
+			)
+			writeErr(w, http.StatusBadRequest, "task has no description and no experience content")
+			return
+		}
 	}
-	if req.Prompt == "" {
-		slog.Warn("task run rejected: empty prompt",
-			slog.String("task_id", id),
-			slog.String("command_type", req.CommandType),
-		)
-		writeErr(w, http.StatusBadRequest,
-			"prompt is required (request body, or task.description)")
-		return
-	}
+	req.Prompt = prompt
 
 	cmd, err := runner.BuildCommand(req.CommandType, req.Model, "", req.Prompt, runner.WithActionReport())
 	if err != nil {
@@ -487,11 +547,15 @@ func (s *APIServer) handleExecutionEvaluate(w http.ResponseWriter, r *http.Reque
 	if req.Model == "" {
 		req.Model = "sonnet"
 	}
-	// 找 task prompt：优先 task.description，否则用 prompt 字段
+	// 找 task prompt：用 BuildTaskPrompt 注入完整 task + experience 信息
 	prompt := exec.Command
 	if exec.TaskID != "" {
 		if t, err := s.db.Get(exec.TaskID); err == nil {
-			prompt = "任务标题: " + t.Title + "\n任务描述: " + t.Description
+			var exp *backend.Experience
+			if t.ExperienceID != "" {
+				exp, _ = s.expDB.Get(t.ExperienceID)
+			}
+			prompt = BuildTaskPrompt(t, exp)
 		}
 	}
 	// 异步执行（避免 HTTP 阻塞 30s+）
