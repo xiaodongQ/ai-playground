@@ -302,7 +302,7 @@ async function loadRecentExecutions() {
       return `<div style="${rowStyle}">
         <span title="${e.source}">${src}</span>
         <span style="color:var(--text-secondary);font-family:monospace">${dt}</span>
-        <span style="flex:1;font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;text-decoration:underline dotted;max-width:280px" onclick="viewExecutionDetail('${e.id}')" title="${esc(e.command)}">${esc(e.command)}</span>
+        <span style="flex:1;font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;text-decoration:underline dotted;max-width:400px" onclick="viewExecutionDetail('${e.id}')" title="${esc(e.command)}">${esc(e.command)}</span>
         <span style="font-size:11px;color:${statusColor}" title="${statusTitle}">${statusIcon}</span>
         ${evalBadge}
         <button class="btn btn-small" onclick="viewExecutionDetail('${e.id}')" title="查看详情">📋</button>
