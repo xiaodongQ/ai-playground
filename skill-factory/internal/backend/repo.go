@@ -107,6 +107,7 @@ func InitSchema(db *sql.DB) error {
 		prompt TEXT,
 		working_dir TEXT,
 		enabled INTEGER DEFAULT 1,
+		timeout_sec INTEGER DEFAULT 0,
 		last_run_at DATETIME,
 		last_status TEXT,
 		last_execution_id TEXT,
@@ -719,16 +720,16 @@ type ScheduledTaskRepo struct{ db *sql.DB }
 func NewScheduledTaskRepo(db *sql.DB) *ScheduledTaskRepo { return &ScheduledTaskRepo{db: db} }
 
 func (r *ScheduledTaskRepo) Create(t *ScheduledTask) error {
-	q := `INSERT INTO scheduled_tasks (id,name,cron_expr,command_type,model,prompt,working_dir,enabled,created_at)
-	        VALUES (?,?,?,?,?,?,?,?,?)`
+	q := `INSERT INTO scheduled_tasks (id,name,cron_expr,command_type,model,prompt,working_dir,enabled,timeout_sec,created_at)
+	        VALUES (?,?,?,?,?,?,?,?,?,?)`
 	_, err := r.db.Exec(q, t.ID, t.Name, t.CronExpr, t.CommandType, t.Model, t.Prompt,
-		t.WorkingDir, boolToInt(t.Enabled), t.CreatedAt)
+		t.WorkingDir, boolToInt(t.Enabled), t.TimeoutSec, t.CreatedAt)
 	return err
 }
 
 func (r *ScheduledTaskRepo) Update(t *ScheduledTask) error {
-	_, err := r.db.Exec(`UPDATE scheduled_tasks SET name=?, cron_expr=?, command_type=?, model=?, prompt=?, working_dir=?, enabled=? WHERE id=?`,
-		t.Name, t.CronExpr, t.CommandType, t.Model, t.Prompt, t.WorkingDir, boolToInt(t.Enabled), t.ID)
+	_, err := r.db.Exec(`UPDATE scheduled_tasks SET name=?, cron_expr=?, command_type=?, model=?, prompt=?, working_dir=?, enabled=?, timeout_sec=? WHERE id=?`,
+		t.Name, t.CronExpr, t.CommandType, t.Model, t.Prompt, t.WorkingDir, boolToInt(t.Enabled), t.TimeoutSec, t.ID)
 	return err
 }
 

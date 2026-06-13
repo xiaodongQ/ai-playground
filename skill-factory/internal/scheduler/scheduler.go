@@ -172,7 +172,16 @@ func (s *Scheduler) execute(t *backend.ScheduledTask) {
 		"event":             "started",
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	// 计算超时：任务配置 > 默认（AI任务1小时，shell任务5分钟）
+	timeout := t.TimeoutSec
+	if timeout <= 0 {
+		if t.CommandType == "shell" {
+			timeout = 5 * 60 // 5分钟
+		} else {
+			timeout = 60 * 60 // 1小时
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 	res, _ := executor.Run(ctx, cmd, func(chunk string) {
 		s.hub.Broadcast(wsmsg.ChannelScheduled, map[string]any{

@@ -141,6 +141,7 @@ type ScheduledTask struct {
 	Prompt         string     `json:"prompt,omitempty"`
 	WorkingDir     string     `json:"working_dir,omitempty"`
 	Enabled        bool       `json:"enabled"`
+	TimeoutSec     int        `json:"timeout_sec"` // 超时秒数，0=默认（AI任务1小时，shell 5分钟）
 	LastRunAt      *time.Time `json:"last_run_at,omitempty"`
 	LastStatus     string     `json:"last_status,omitempty"`
 	LastExecutionID string    `json:"last_execution_id,omitempty"`

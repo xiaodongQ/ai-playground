@@ -206,6 +206,7 @@ function showScheduledModal() {
   document.getElementById('sched-type').value = 'shell';
   document.getElementById('sched-model').value = '';
   document.getElementById('sched-prompt').value = '';
+  document.getElementById('sched-timeout').value = '';
   document.getElementById('sched-enabled').checked = true;
   document.getElementById('sched-submit-btn').textContent = '创建';
   document.getElementById('scheduled-modal').classList.remove('hidden');
@@ -221,6 +222,7 @@ async function editScheduled(id) {
   document.getElementById('sched-type').value = s.command_type;
   document.getElementById('sched-model').value = s.model || '';
   document.getElementById('sched-prompt').value = s.prompt;
+  document.getElementById('sched-timeout').value = s.timeout_sec || '';
   document.getElementById('sched-enabled').checked = s.enabled;
   document.getElementById('sched-submit-btn').textContent = '保存';
   document.getElementById('scheduled-modal').classList.remove('hidden');
@@ -232,9 +234,10 @@ function submitScheduled() {
   const type = document.getElementById('sched-type').value;
   const model = document.getElementById('sched-model').value.trim();
   const promptText = document.getElementById('sched-prompt').value.trim();
+  const timeoutSec = parseInt(document.getElementById('sched-timeout').value) || 0;
   const enabled = document.getElementById('sched-enabled').checked;
   if (!name || !cron || !promptText) { alert('名称、Cron、Prompt 必填'); return; }
-  const body = {name, cron_expr:cron, command_type:type, prompt:promptText, model, enabled};
+  const body = {name, cron_expr:cron, command_type:type, prompt:promptText, model, timeout_sec:timeoutSec, enabled};
   if (id) {
     // 更新
     fetch('/api/scheduled/' + id, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})

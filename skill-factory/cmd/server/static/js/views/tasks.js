@@ -100,6 +100,22 @@ function removeExpFromTask(id) {
   renderTaskExpChips();
 }
 
+let _taskSortField = 'created_at';
+let _taskSortDir = 'desc';
+function setTaskSort(field) {
+  if (_taskSortField === field) {
+    _taskSortDir = _taskSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _taskSortField = field;
+    _taskSortDir = 'desc';
+  }
+  loadTasks();
+}
+function sortIcon(field) {
+  if (_taskSortField !== field) return ' ↕';
+  return _taskSortDir === 'asc' ? ' ↑' : ' ↓';
+}
+
 async function loadTasks() {
   const status = document.getElementById('filter-status').value;
   const url = API + '/api/tasks' + (status ? '?status=' + status : '');
@@ -118,10 +134,18 @@ function renderTaskTable(list) {
     document.getElementById('task-count').textContent = '0 条任务';
     return;
   }
+  // 排序
+  const sorted = [...list].sort((a, b) => {
+    let va = a[_taskSortField], vb = b[_taskSortField];
+    if (_taskSortField === 'created_at') { va = new Date(va); vb = new Date(vb); }
+    if (va < vb) return _taskSortDir === 'asc' ? -1 : 1;
+    if (va > vb) return _taskSortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
   document.getElementById('task-count').textContent = list.length + ' 条任务';
   el.innerHTML = `<table>
-    <thead><tr><th>标题</th><th>状态</th><th>版本</th><th>创建时间</th><th>操作</th></tr></thead>
-    <tbody>${list.map(t => {
+    <thead><tr><th>标题</th><th style="cursor:pointer" onclick="setTaskSort('status')">状态${sortIcon('status')}</th><th>版本</th><th style="cursor:pointer" onclick="setTaskSort('created_at')">创建时间${sortIcon('created_at')}</th><th>操作</th></tr></thead>
+    <tbody>${sorted.map(t => {
       // 按状态分按钮
       const ops = taskOpsByStatus(t);
       return `
