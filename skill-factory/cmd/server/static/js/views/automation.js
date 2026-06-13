@@ -354,12 +354,18 @@ async function viewExecutionDetail(id) {
       : `<b style="color:${ok?'var(--archived)':'var(--exception)'}">${exec.exit_code}</b>`;
     document.getElementById('exec-detail-meta').innerHTML =
       `<b>${esc(exec.source)}</b> · exit_code=${exitDisplay} · ${esc(new Date(exec.started_at).toLocaleString())} · 耗时 ${dur}`;
-    // 根据当前 execution 是否在评估中来显示状态
+    // 根据当前 execution 是否在评估中来显示状态和按钮
     const isEvalNow = _evaluatingIds.has(id);
+    const evalBtn = document.getElementById('exec-detail-eval-btn');
+    const evalSel = document.getElementById('eval-model-select');
     if (isEvalNow) {
       document.getElementById('exec-detail-eval').innerHTML = '<span style="color:var(--info,#3b82f6);font-size:12px">⏳ 评估中...</span>';
+      if (evalBtn) { evalBtn.disabled = true; evalBtn.textContent = '⏳ 评估中'; }
+      if (evalSel) evalSel.disabled = true;
     } else {
       document.getElementById('exec-detail-eval').innerHTML = '<span style="color:var(--text-secondary);font-size:12px">点下方"📊 AI 评估"按钮调 LLM 给这次执行打分</span>';
+      if (evalBtn) { evalBtn.disabled = false; evalBtn.textContent = '📊 AI 评估'; }
+      if (evalSel) evalSel.disabled = false;
     }
     // 拉已有评估
     try {

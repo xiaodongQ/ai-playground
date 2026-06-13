@@ -73,7 +73,6 @@ func (s *APIServer) routes() {
 	mux.HandleFunc("GET /api/tasks/{id}", s.handleTaskGet)
 	mux.HandleFunc("PUT /api/tasks/{id}", s.handleTaskUpdate)
 	mux.HandleFunc("PUT /api/tasks/{id}/status", s.handleTaskStatus)
-	mux.HandleFunc("PUT /api/tasks/{id}/status", s.handleTaskStatus)
 	mux.HandleFunc("POST /api/tasks/{id}/unclaim", s.handleTaskUnclaim)
 	mux.HandleFunc("POST /api/tasks/{id}/run", s.handleTaskRun)
 	mux.HandleFunc("POST /api/tasks/{id}/cancel", s.handleTaskCancel)
