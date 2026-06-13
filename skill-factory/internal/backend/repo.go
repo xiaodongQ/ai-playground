@@ -567,8 +567,30 @@ func (r *WebLinkRepo) Create(w *WebLink) error {
 }
 
 func (r *WebLinkRepo) Update(w *WebLink) error {
-	_, err := r.db.Exec(`UPDATE web_links SET name=?, url=?, icon_url=?, sort_order=? WHERE id=?`,
-		w.Name, w.URL, w.IconURL, w.SortOrder, w.ID)
+	set := []string{}
+	args := []any{}
+	if w.Name != "" {
+		set = append(set, "name=?")
+		args = append(args, w.Name)
+	}
+	if w.URL != "" {
+		set = append(set, "url=?")
+		args = append(args, w.URL)
+	}
+	if w.IconURL != "" {
+		set = append(set, "icon_url=?")
+		args = append(args, w.IconURL)
+	}
+	if w.SortOrder > 0 {
+		set = append(set, "sort_order=?")
+		args = append(args, w.SortOrder)
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	args = append(args, w.ID)
+	q := "UPDATE web_links SET " + strings.Join(set, ",") + " WHERE id=?"
+	_, err := r.db.Exec(q, args...)
 	return err
 }
 
@@ -620,8 +642,26 @@ func (r *DirShortcutRepo) Create(d *DirShortcut) error {
 }
 
 func (r *DirShortcutRepo) Update(d *DirShortcut) error {
-	_, err := r.db.Exec(`UPDATE dir_shortcuts SET name=?, path=?, sort_order=? WHERE id=?`,
-		d.Name, d.Path, d.SortOrder, d.ID)
+	set := []string{}
+	args := []any{}
+	if d.Name != "" {
+		set = append(set, "name=?")
+		args = append(args, d.Name)
+	}
+	if d.Path != "" {
+		set = append(set, "path=?")
+		args = append(args, d.Path)
+	}
+	if d.SortOrder > 0 {
+		set = append(set, "sort_order=?")
+		args = append(args, d.SortOrder)
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	args = append(args, d.ID)
+	q := "UPDATE dir_shortcuts SET " + strings.Join(set, ",") + " WHERE id=?"
+	_, err := r.db.Exec(q, args...)
 	return err
 }
 
