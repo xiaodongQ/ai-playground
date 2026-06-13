@@ -4,4 +4,6 @@ data/
 *.db
 bin/
 .codegraph
-server
+# server 二进制（避免误忽略 cmd/server/static/ 等前端资源）
+cmd/server/server
+cmd/server/*.exe
