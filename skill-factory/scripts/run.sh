@@ -86,9 +86,17 @@ stop() {
   fi
   PID=$(cat "$PID_FILE")
   if kill -0 "$PID" 2>/dev/null; then
-    kill "$PID"
+    kill "$PID" 2>/dev/null || true
     echo "==> 停止 pid=$PID"
     sleep 0.5
+    # 等待确认进程退出
+    for i in 1 2 3; do
+      kill -0 "$PID" 2>/dev/null || break
+      sleep 0.3
+    done
+    kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null || true
+  else
+    echo "PID=$PID 已不存在（残留 PID 文件）"
   fi
   rm -f "$PID_FILE"
 }
