@@ -154,7 +154,7 @@ function renderTaskTable(list) {
           <span class="edit-icon" onclick="editTask('${t.id}')" title="编辑" style="cursor:pointer;color:var(--text-secondary);font-size:14px">✏️</span>
           <div class="task-title-cell">
             <div class="title">${esc(t.title)}</div>
-            ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ''}
+            ${t.description ? `<div class="desc" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.description)}">${esc(t.description)}</div>` : ''}
           </div>
         </td>
         <td>${statusTag(t.status)}</td>
@@ -176,14 +176,14 @@ function taskOpsByStatus(t) {
     case 'pending':
       return `
         <button class="btn btn-warning btn-small" onclick="claimTask('${id}')" title="认领后：状态→in_progress，maintainer 标记为你，可以▶运行">🟡 认领</button>
-        <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')" title="直接归档（不需执行）">归档</button>
+        <button class="btn btn-small" onclick="archiveTask('${id}')" title="直接归档（不需执行）" style="background:#f59e0b;color:#fff">归档</button>
         <button class="btn btn-danger btn-small" onclick="deleteTask('${id}', '${esc(t.title)}')" title="硬删任务及其所有 executions / evaluations（不可恢复）" style="background:#dc2626">🗑 删除</button>
       `;
     case 'in_progress':
       return `
         <button class="btn btn-primary btn-small" onclick="runTask('${id}')" title="立即用 AI CLI 跑这个任务（流式输出在 /api/tasks/{id}/run）">▶ 运行</button>
         <button class="btn btn-small" onclick="unclaimTask('${id}')" title="退回 pending（清空 maintainer/started_at）" style="background:#94a3b8;color:#fff">↩ 取消认领</button>
-        <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')">归档</button>
+        <button class="btn btn-small" onclick="archiveTask('${id}')" title="归档" style="background:#f59e0b;color:#fff">归档</button>
         <button class="btn btn-danger btn-small" onclick="deleteTask('${id}', '${esc(t.title)}')" title="硬删任务及其所有 executions / evaluations（不可恢复）" style="background:#dc2626">🗑 删除</button>
       `;
     case 'archived':
@@ -194,7 +194,7 @@ function taskOpsByStatus(t) {
     case 'exception':
       return `
         <button class="btn btn-warning btn-small" onclick="reopenTask('${id}')" title="异常→重新打开回到 pending">↻ 重新打开</button>
-        <button class="btn btn-danger btn-small" onclick="archiveTask('${id}')">归档</button>
+        <button class="btn btn-small" onclick="archiveTask('${id}')" title="归档" style="background:#f59e0b;color:#fff">归档</button>
         <button class="btn btn-danger btn-small" onclick="deleteTask('${id}', '${esc(t.title)}')" title="硬删任务及其所有 executions / evaluations（不可恢复）" style="background:#dc2626">🗑 删除</button>
       `;
     default:
