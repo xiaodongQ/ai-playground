@@ -248,8 +248,14 @@ async function submitRunTask() {
   try {
     const body = JSON.stringify({command_type: type, model: model});
     const r = await fetchJSON(API + '/api/tasks/' + taskId + '/run', {method:'POST', headers:{'Content-Type':'application/json'}, body});
-    alert('已启动 execution_id=' + r.execution_id + '\n（' + type + (type !== 'shell' ? ' / ' + model : '') + '）\n去"⚡ 自动化 Tab 最近执行"看流式输出');
-    reloadCurrentTab();
+    const summary = type + (type !== 'shell' ? ' / ' + model : '');
+    // 询问是否跳转到自动化 Tab 看流式输出
+    if (confirm(`✅ 已启动 execution_id=${r.execution_id}\n（${summary}）\n\n跳转到"⚡ 自动化 Tab"查看流式输出吗？`)) {
+      switchTab('automation');
+      // 自动化 Tab 的自动刷新会拉最新 executions,无需手动 reload
+    } else {
+      reloadCurrentTab();
+    }
   } catch (e) { alert('启动失败：' + e.message); }
 }
 

@@ -7,8 +7,8 @@ let autoRefreshTimer = null;
 let _autoRefreshEnabled = true;
 
 function getRefreshSeconds() {
-  const v = parseInt(localStorage.getItem(REFRESH_KEY) || '10', 10);
-  return isNaN(v) || v < 1 ? 10 : v;
+  const v = parseInt(localStorage.getItem(REFRESH_KEY) || '3', 10);
+  return isNaN(v) || v < 1 ? 3 : v;
 }
 function setRefreshSeconds(s) {
   localStorage.setItem(REFRESH_KEY, String(s));
