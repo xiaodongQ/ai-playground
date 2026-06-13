@@ -126,7 +126,8 @@ function renderTaskTable(list) {
       const ops = taskOpsByStatus(t);
       return `
       <tr>
-        <td>
+        <td style="display:flex;align-items:center;gap:6px">
+          <span class="edit-icon" onclick="showTaskModal(t)" title="编辑" style="cursor:pointer;color:var(--text-secondary);font-size:14px">✏️</span>
           <div class="task-title-cell">
             <div class="title">${esc(t.title)}</div>
             ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ''}
@@ -348,6 +349,7 @@ function closeTaskModal() {
 }
 
 async function submitTask() {
+  const id = document.getElementById('task-id').value;
   const title = document.getElementById('task-title').value.trim();
   if (!title) { alert('请输入标题'); return; }
   const body = {
@@ -358,11 +360,19 @@ async function submitTask() {
     resources: document.getElementById('task-resources').value,
     acceptance: document.getElementById('task-acceptance').value
   };
-  await fetch(API + '/api/tasks', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  });
+  if (id) {
+    await fetch(API + '/api/tasks/' + id, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+  } else {
+    await fetch(API + '/api/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+  }
   closeTaskModal();
   loadDashboard();
   if (currentTab === 'tasks') loadTasks();

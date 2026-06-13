@@ -16,6 +16,8 @@ import (
 	"skill-factory/internal/wsmsg"
 )
 
+const schedulerEnabledKey = "scheduler.enabled"
+
 // Scheduler 进程内 cron 引擎，加载 DB 中 enabled=1 的 scheduled_tasks。
 type Scheduler struct {
 	mu      sync.Mutex
@@ -23,6 +25,7 @@ type Scheduler struct {
 	repo    *backend.ScheduledTaskRepo
 	execDB  *backend.ExecutionRepo
 	hub     *hub.Hub
+	settings *backend.AppSettingsRepo
 	running bool
 }
 
@@ -34,6 +37,24 @@ func New(repo *backend.ScheduledTaskRepo, execDB *backend.ExecutionRepo, h *hub.
 		execDB: execDB,
 		hub:    h,
 	}
+}
+
+// WithSettings 设置持久化 repo（用于自动启动/状态保存）。
+func (s *Scheduler) WithSettings(settings *backend.AppSettingsRepo) *Scheduler {
+	s.settings = settings
+	return s
+}
+
+// AutoStart 根据保存的状态自动启动调度器。
+func (s *Scheduler) AutoStart() error {
+	if s.settings == nil {
+		return nil
+	}
+	val, err := s.settings.Get(schedulerEnabledKey)
+	if err != nil || val != "true" {
+		return nil
+	}
+	return s.Start()
 }
 
 // Start 加载 enabled=1 的所有任务并启动 cron。
@@ -51,6 +72,10 @@ func (s *Scheduler) Start() error {
 	s.mu.Lock()
 	s.running = true
 	s.mu.Unlock()
+	// 持久化状态
+	if s.settings != nil {
+		_ = s.settings.Set(schedulerEnabledKey, "true")
+	}
 	s.hub.Broadcast(wsmsg.ChannelScheduler, map[string]any{"status": "running"})
 	return nil
 }
@@ -65,6 +90,10 @@ func (s *Scheduler) Stop() {
 	ctx := s.cron.Stop()
 	<-ctx.Done()
 	s.running = false
+	// 持久化状态
+	if s.settings != nil {
+		_ = s.settings.Set(schedulerEnabledKey, "false")
+	}
 	s.hub.Broadcast(wsmsg.ChannelScheduler, map[string]any{"status": "stopped"})
 }
 

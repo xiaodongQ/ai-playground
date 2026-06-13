@@ -32,6 +32,8 @@ function debounce(fn, ms) {
 }
 
 function switchTab(tab) {
+  // 离开当前 tab 前的清理
+  if (currentTab === 'dashboard' && typeof stopDashboardAutoRefresh === 'function') stopDashboardAutoRefresh();
   currentTab = tab;
   localStorage.setItem('sf-current-tab', tab);
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.tab === tab));

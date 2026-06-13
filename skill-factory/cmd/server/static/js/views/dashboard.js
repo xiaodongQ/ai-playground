@@ -16,6 +16,7 @@ async function loadDashboard() {
     renderRecentTasks(recent);
   } catch(e) { console.error(e); }
   // 调度器 + 最近执行（链接/目录/todo 由 widgets.js 独立加载）
+  initDashboardAutoRefresh();
   loadScheduler();
   loadScheduledSummary();
   loadRecentExecutions();
@@ -54,7 +55,7 @@ function renderRecentTasks(list) {
   </table>`;
 }
 
-// ===== 调度器徽章 + 按钮联动（dashboard 顶部） =====
+// ===== 调度器状态（dashboard 顶部，只读展示） =====
 async function loadScheduler() {
   const data = await fetchJSON('/api/scheduler/status');
   const running = !!data.running;
@@ -63,18 +64,49 @@ async function loadScheduler() {
       ? '<span id="' + el.id + '" class="scheduler-badge running"><span class="dot green"></span>运行中</span>'
       : '<span id="' + el.id + '" class="scheduler-badge stopped"><span class="dot gray"></span>已停止</span>';
   });
-  // 同步 3 个按钮状态
+  // 同步自动化页面的调度器按钮状态（只禁用，不改文案）
   document.querySelectorAll('[data-sched-action]').forEach(btn => {
     const act = btn.dataset.schedAction;
-    if (act === 'start') {
-      btn.disabled = running;
-      btn.textContent = running ? '✓ 已运行' : '启动';
-    } else if (act === 'stop') {
-      btn.disabled = !running;
-      btn.textContent = running ? '停止' : '已停止';
-    }
+    if (act === 'start') btn.disabled = running;
+    else if (act === 'stop') btn.disabled = !running;
   });
 }
-function schedulerStart() { fetch('/api/scheduler/start', {method:'POST'}).then(() => { loadScheduler(); loadScheduledSummary(); }); }
-function schedulerStop() { fetch('/api/scheduler/stop', {method:'POST'}).then(() => { loadScheduler(); }); }
-function schedulerReload() { fetch('/api/scheduler/reload', {method:'POST'}).then(() => { loadScheduledSummary(); loadScheduled(); }); }
+
+// ===== 总览页自动刷新状态指示器（只读展示） =====
+let dashboardAutoRefreshTimer = null;
+
+function updateDashboardRefreshStatus() {
+  const el = document.getElementById('dashboard-refresh-status');
+  if (!el) return;
+  const secs = typeof window.getRefreshSeconds === 'function' ? window.getRefreshSeconds() : 3;
+  const isEnabled = window._autoRefreshEnabled;
+  if (isEnabled) {
+    el.innerHTML = '<span style="color:var(--archived)">● 自动刷新</span> · <span style="color:var(--archived);font-weight:500">' + secs + 's</span>';
+  } else {
+    el.innerHTML = '<span style="color:var(--text-secondary)">● 自动刷新（已暂停）</span>';
+  }
+}
+
+function startDashboardAutoRefresh() {
+  if (dashboardAutoRefreshTimer) clearInterval(dashboardAutoRefreshTimer);
+  const ms = (window.getRefreshSeconds || function() { return 3; })() * 1000;
+  dashboardAutoRefreshTimer = setInterval(() => {
+    if (!window._autoRefreshEnabled) return;
+    if (document.hidden) return;
+    const anyModalOpen = document.querySelector('.modal-overlay:not(.hidden)');
+    if (anyModalOpen) return;
+    loadRecentExecutions();
+    updateDashboardRefreshStatus();
+  }, ms);
+}
+function stopDashboardAutoRefresh() {
+  if (dashboardAutoRefreshTimer) { clearInterval(dashboardAutoRefreshTimer); dashboardAutoRefreshTimer = null; }
+}
+
+function initDashboardAutoRefresh() {
+  const isEnabled = window._autoRefreshEnabled;
+  if (isEnabled) {
+    startDashboardAutoRefresh();
+  }
+  updateDashboardRefreshStatus();
+}

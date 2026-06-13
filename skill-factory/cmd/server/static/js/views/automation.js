@@ -6,38 +6,48 @@ const REFRESH_KEY = 'automation.refreshSeconds';
 let autoRefreshTimer = null;
 let _autoRefreshEnabled = true;
 
-function getRefreshSeconds() {
+// 暴露全局状态供其他页面使用（如总览页）
+window._autoRefreshEnabled = true;
+window.getRefreshSeconds = function() {
   const v = parseInt(localStorage.getItem(REFRESH_KEY) || '3', 10);
   return isNaN(v) || v < 1 ? 3 : v;
-}
+};
+window.startAutoRefresh = startAutoRefresh;
+window.stopAutoRefresh = stopAutoRefresh;
+window.updateRefreshIndicator = updateRefreshIndicator;
+
 function setRefreshSeconds(s) {
   localStorage.setItem(REFRESH_KEY, String(s));
   if (autoRefreshTimer) {
     clearInterval(autoRefreshTimer);
     startAutoRefresh();
   }
-  updateRefreshIndicator();
+  // 确保下拉框可用
+  const select = document.getElementById('auto-refresh-secs');
+  if (select) select.disabled = false;
+  updateAutoRefreshStatusIndicator(true);
+  if (typeof updateDashboardRefreshIndicator === 'function') updateDashboardRefreshIndicator();
 }
 function startAutoRefresh() {
   if (autoRefreshTimer) clearInterval(autoRefreshTimer);
-  const ms = getRefreshSeconds() * 1000;
+  const ms = window.getRefreshSeconds() * 1000;
   autoRefreshTimer = setInterval(() => {
-    if (!_autoRefreshEnabled) return;
+    if (!window._autoRefreshEnabled) return;
     if (document.hidden) return; // 后台 tab 不刷
     // modal 打开时只刷后台数据，不刷 modal 视图（避免覆盖用户正在看的内容）
     const anyModalOpen = document.querySelector('.modal-overlay:not(.hidden)');
     if (anyModalOpen && anyModalOpen.id !== 'exec-detail-modal') return;
     loadAutomation({silent: true});
   }, ms);
-  updateRefreshIndicator();
+  updateAutoRefreshStatusIndicator(true);
 }
 function stopAutoRefresh() {
   if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
-  updateRefreshIndicator();
+  updateAutoRefreshStatusIndicator(false);
 }
 function updateRefreshIndicator() {
   const el = document.getElementById('auto-refresh-indicator');
-  if (el) el.textContent = autoRefreshTimer ? `🔄 ${getRefreshSeconds()}s` : '⏸ 暂停';
+  if (el) el.textContent = autoRefreshTimer ? `🔄 ${window.getRefreshSeconds()}s` : '⏸ 暂停';
 }
 
 async function loadAutomation(opts) {
@@ -48,15 +58,76 @@ async function loadAutomation(opts) {
 // 暴露给 HTML 控件
 function manualRefresh() { loadAutomation({silent: false}); }
 function changeRefreshSeconds(v) { setRefreshSeconds(parseInt(v, 10)); }
+const AUTO_REFRESH_ENABLED_KEY = 'automation.autoRefreshEnabled';
+
 function toggleAutoRefresh() {
-  if (autoRefreshTimer) { stopAutoRefresh(); _autoRefreshEnabled = false; }
-  else { _autoRefreshEnabled = true; startAutoRefresh(); }
+  const btn = document.getElementById('auto-refresh-toggle-btn');
+  const freqWrap = document.getElementById('auto-refresh-freq-wrap');
+  if (autoRefreshTimer) {
+    stopAutoRefresh(); window._autoRefreshEnabled = false;
+    localStorage.setItem(AUTO_REFRESH_ENABLED_KEY, 'false');
+    if (btn) btn.textContent = '开启';
+    if (freqWrap) freqWrap.style.display = 'none';
+    updateAutoRefreshStatusIndicator(false);
+    // 同步总览页状态
+    if (typeof updateDashboardRefreshStatus === 'function') updateDashboardRefreshStatus();
+  } else {
+    window._autoRefreshEnabled = true; startAutoRefresh();
+    localStorage.setItem(AUTO_REFRESH_ENABLED_KEY, 'true');
+    if (btn) btn.textContent = '暂停';
+    if (freqWrap) freqWrap.style.display = 'inline';
+    updateAutoRefreshStatusIndicator(true);
+    // 同步总览页状态
+    if (typeof updateDashboardRefreshStatus === 'function') updateDashboardRefreshStatus();
+  }
 }
 
-// 页面首次进入启动 auto-refresh
+function updateAutoRefreshStatusIndicator(running) {
+  const el = document.getElementById('auto-refresh-status');
+  const freqWrap = document.getElementById('auto-refresh-freq-wrap');
+  if (!el) return;
+  if (running) {
+    el.innerHTML = '<span style="color:var(--archived)">● 自动刷新</span>';
+    if (freqWrap) freqWrap.style.display = 'inline';
+  } else {
+    el.innerHTML = '<span style="color:var(--text-secondary)">● 自动刷新（已暂停）</span>';
+    if (freqWrap) freqWrap.style.display = 'none';
+  }
+}
+
+// 调度器控制（供 HTML 按钮调用）
+function schedulerStart() { fetch('/api/scheduler/start', {method:'POST'}).then(() => { loadScheduler(); loadScheduledSummary(); }); }
+function schedulerStop() { fetch('/api/scheduler/stop', {method:'POST'}).then(() => { loadScheduler(); }); }
+function schedulerReload() { fetch('/api/scheduler/reload', {method:'POST'}).then(() => { loadScheduledSummary(); loadScheduled(); }); }
+
+// 页面首次进入：根据本地存储恢复自动刷新状态
 if (typeof window !== 'undefined') {
   document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(() => { if (typeof loadAutomation === 'function') { startAutoRefresh(); } }, 500);
+    setTimeout(() => {
+      const savedEnabled = localStorage.getItem(AUTO_REFRESH_ENABLED_KEY);
+      const shouldEnable = savedEnabled === null ? true : savedEnabled === 'true';
+      const btn = document.getElementById('auto-refresh-toggle-btn');
+      const freqWrap = document.getElementById('auto-refresh-freq-wrap');
+      const select = document.getElementById('auto-refresh-secs');
+      // 恢复下拉框值为本地存储的值
+      if (select) {
+        const savedSecs = localStorage.getItem(REFRESH_KEY);
+        if (savedSecs) select.value = savedSecs;
+      }
+      if (shouldEnable) {
+        if (typeof loadAutomation === 'function') { startAutoRefresh(); }
+        if (btn) btn.textContent = '暂停';
+        if (freqWrap) freqWrap.style.display = 'inline';
+        updateAutoRefreshStatusIndicator(true);
+      } else {
+        window._autoRefreshEnabled = false;
+        if (btn) btn.textContent = '开启';
+        if (freqWrap) freqWrap.style.display = 'none';
+        updateAutoRefreshStatusIndicator(false);
+      }
+      // 同步总览页状态
+      if (typeof updateDashboardRefreshStatus === 'function') updateDashboardRefreshStatus();
+    }, 500);
   });
 }
 
@@ -69,8 +140,11 @@ async function loadScheduledSummary() {
   }
   el.innerHTML = list.slice(0, 5).map(s => {
     const status = s.last_status || 'pending';
-    return `<div class="scheduled-item" onclick="runScheduled('${s.id}')" title="点击立即触发">
-      <span class="s-name">${esc(s.name)}</span>
+    const enabledBadge = s.enabled
+      ? ''
+      : ' <span style="color:var(--text-secondary);font-size:10px">(已禁用)</span>';
+    return `<div class="scheduled-item">
+      <span class="s-name">${esc(s.name)}${enabledBadge}</span>
       <span class="s-cron">${esc(s.cron_expr)}</span>
       <span class="s-status ${status}">${status}</span>
     </div>`;
@@ -100,7 +174,10 @@ async function loadScheduled() {
     const toggleLabel = s.enabled ? '⏸ 停用' : '▶ 启用';
     const toggleBtnClass = s.enabled ? 'btn btn-small' : 'btn btn-small btn-primary';
     return `<tr>
-      <td><strong>${esc(s.name)}</strong>${enabledBadge}</td>
+      <td>
+        <span class="edit-icon" onclick="editScheduled('${s.id}')" title="编辑" style="cursor:pointer;margin-right:6px;color:var(--text-secondary);font-size:14px">✏️</span>
+        <strong>${esc(s.name)}</strong>${enabledBadge}
+      </td>
       <td><code>${esc(s.cron_expr)}</code></td>
       <td>${esc(s.command_type)}${s.model?' / '+esc(s.model):''}</td>
       <td>${statusBadge}</td>
@@ -122,17 +199,34 @@ function toggleScheduled(id, currentlyEnabled) {
 }
 
 function showScheduledModal() {
+  document.getElementById('sched-id').value = '';
+  document.getElementById('sched-modal-title').textContent = '新建定时任务';
   document.getElementById('sched-name').value = '';
   document.getElementById('sched-cron').value = '@every 30s';
   document.getElementById('sched-type').value = 'shell';
   document.getElementById('sched-model').value = '';
   document.getElementById('sched-prompt').value = '';
   document.getElementById('sched-enabled').checked = true;
+  document.getElementById('sched-submit-btn').textContent = '创建';
   document.getElementById('scheduled-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('sched-name').focus(), 50);
 }
 function closeScheduledModal() { document.getElementById('scheduled-modal').classList.add('hidden'); }
+async function editScheduled(id) {
+  const s = await fetchJSON('/api/scheduled/' + id);
+  document.getElementById('sched-id').value = s.id;
+  document.getElementById('sched-modal-title').textContent = '编辑定时任务';
+  document.getElementById('sched-name').value = s.name;
+  document.getElementById('sched-cron').value = s.cron_expr;
+  document.getElementById('sched-type').value = s.command_type;
+  document.getElementById('sched-model').value = s.model || '';
+  document.getElementById('sched-prompt').value = s.prompt;
+  document.getElementById('sched-enabled').checked = s.enabled;
+  document.getElementById('sched-submit-btn').textContent = '保存';
+  document.getElementById('scheduled-modal').classList.remove('hidden');
+}
 function submitScheduled() {
+  const id = document.getElementById('sched-id').value;
   const name = document.getElementById('sched-name').value.trim();
   const cron = document.getElementById('sched-cron').value.trim();
   const type = document.getElementById('sched-type').value;
@@ -140,9 +234,16 @@ function submitScheduled() {
   const promptText = document.getElementById('sched-prompt').value.trim();
   const enabled = document.getElementById('sched-enabled').checked;
   if (!name || !cron || !promptText) { alert('名称、Cron、Prompt 必填'); return; }
-  fetch('/api/scheduled', {method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name, cron_expr:cron, command_type:type, prompt:promptText, model, enabled})})
-    .then(() => { closeScheduledModal(); loadScheduled(); loadScheduledSummary(); });
+  const body = {name, cron_expr:cron, command_type:type, prompt:promptText, model, enabled};
+  if (id) {
+    // 更新
+    fetch('/api/scheduled/' + id, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+      .then(() => { closeScheduledModal(); loadScheduled(); loadScheduledSummary(); loadScheduler(); });
+  } else {
+    // 新建
+    fetch('/api/scheduled', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+      .then(() => { closeScheduledModal(); loadScheduled(); loadScheduledSummary(); loadScheduler(); });
+  }
 }
 function runScheduled(id) {
   fetch('/api/scheduled/' + id + '/run-now', {method:'POST'})

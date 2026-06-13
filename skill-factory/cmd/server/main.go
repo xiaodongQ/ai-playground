@@ -1175,7 +1175,10 @@ func main() {
 	settingsRepo := backend.NewAppSettingsRepo(db)
 	evalRepo := backend.NewEvaluationRepo(db)
 	h := hub.New()
-	sch := scheduler.New(schedRepo, execRepo, h)
+	sch := scheduler.New(schedRepo, execRepo, h).WithSettings(settingsRepo)
+	if err := sch.AutoStart(); err != nil {
+		log.Printf("[scheduler] auto start failed: %v", err)
+	}
 	srv := NewAPIServer(taskRepo, expRepo, execRepo,
 		linkRepo, dirRepo, schedRepo, settingsRepo, evalRepo, sch, h)
 

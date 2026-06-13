@@ -177,12 +177,32 @@ function deleteDir(id) {
 }
 
 // ===== 待办（支持增删 + 勾选） =====
+const TODO_SHOW_ALL_KEY = 'todo.showAll';
+function toggleTodoShowAll() {
+  const el = document.getElementById('todo-show-all-icon');
+  const active = el.textContent === '☑';
+  const newActive = !active;
+  el.textContent = newActive ? '☑' : '☐';
+  el.style.opacity = newActive ? '1' : '0.5';
+  localStorage.setItem(TODO_SHOW_ALL_KEY, newActive ? 'true' : 'false');
+  loadTodo();
+}
+function initTodoShowAll() {
+  const el = document.getElementById('todo-show-all-icon');
+  if (!el) return;
+  const saved = localStorage.getItem(TODO_SHOW_ALL_KEY);
+  const showAll = saved === 'true';
+  el.textContent = showAll ? '☑' : '☐';
+  el.style.opacity = showAll ? '1' : '0.5';
+}
 async function loadTodo() {
+  const showAll = document.getElementById('todo-show-all-icon')?.textContent === '☑';
   const data = await fetchJSON('/api/todo');
   const el = document.getElementById('todo-list');
   if (!data.path) { el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px">未配置 todo.md 路径，点击"设置"</div>'; return; }
-  if (!data.items || data.items.length === 0) { el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px">' + esc(data.path) + ' 无 todo 项</div>'; return; }
-  el.innerHTML = data.items.map(i =>
+  const items = showAll ? (data.items || []) : (data.items || []).filter(i => !i.done);
+  if (items.length === 0) { el.innerHTML = '<div style="color:var(--text-secondary);font-size:12px">' + esc(data.path) + ' 无 todo 项</div>'; return; }
+  el.innerHTML = items.map(i =>
     `<div class="todo-item ${i.done?'done':''}">
       <input type="checkbox" ${i.done?'checked':''} onchange="toggleTodo(${i.line_no}, this.checked)">
       <span class="todo-text">${esc(i.text)}</span>
@@ -268,4 +288,11 @@ async function widgetDrop(e, type, reloadFn) {
   await reorderAndSave(type, idsInNewOrder);
   _dragSrcId = null;
   if (reloadFn) reloadFn();
+}
+
+// 初始化 todo 显示全部状态
+if (typeof window !== "undefined") {
+  document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => { initTodoShowAll(); loadTodo(); }, 100);
+  });
 }
