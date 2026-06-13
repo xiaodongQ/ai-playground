@@ -159,6 +159,8 @@ func determineAICmd(cliType, ctxDir string) string {
 		return "codex"
 	case "cbc":
 		return "cbc"
+	case "codebuddy":
+		return "codebuddy"
 	case "shell":
 		return "sh"
 	default:
@@ -174,7 +176,7 @@ func determineAICmd(cliType, ctxDir string) string {
 		}
 	}
 	if promptFiles != "" {
-		tmpFile := "/tmp/claude-code-skill-factory-prompt.txt"
+		tmpFile := filepath.Join(os.TempDir(), "claude-code-skill-factory-prompt.txt")
 		os.WriteFile(tmpFile, []byte(promptFiles), 0644)
 		return "claude --prompt-file " + tmpFile
 	}

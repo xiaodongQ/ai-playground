@@ -22,11 +22,17 @@ type Result struct {
 
 // Run 启动子进程并流式回调 stdout/stderr。ctx 取消会 kill 子进程。
 // onChunk 收到的每段以 "\n" 结尾的文本片段（来自 stdout 或 stderr，前者无前缀，后者带 "[err] "）。
-func Run(ctx context.Context, cmd []string, onChunk func(string)) (*Result, error) {
+//
+// dir 非空时设置子进程的工作目录（用于落地 ScheduledTask.WorkingDir）。
+// dir 为空时继承父进程 cwd（evaluator 等场景不需要指定）。
+func Run(ctx context.Context, cmd []string, dir string, onChunk func(string)) (*Result, error) {
 	if len(cmd) == 0 {
 		return nil, errors.New("empty command")
 	}
 	c := exec.CommandContext(ctx, cmd[0], cmd[1:]...)
+	if dir != "" {
+		c.Dir = dir
+	}
 	stdout, err := c.StdoutPipe()
 	if err != nil {
 		return nil, err

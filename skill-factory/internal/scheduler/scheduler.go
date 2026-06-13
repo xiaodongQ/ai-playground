@@ -148,11 +148,14 @@ func (s *Scheduler) makeHandler(t *backend.ScheduledTask) func() {
 }
 
 func (s *Scheduler) execute(t *backend.ScheduledTask) {
-	cmd, err := runner.BuildCommand(t.CommandType, t.Model, "", t.Prompt, runner.WithActionReport())
+	cmd, cleanup, err := runner.BuildCommand(t.CommandType, t.Model, "", t.Prompt, runner.WithActionReport())
 	if err != nil {
 		log.Printf("[scheduler] build cmd for %s: %v", t.Name, err)
 		_ = s.repo.UpdateAfterRun(t.ID, "build_error", "")
 		return
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 	exec := &backend.Execution{
 		ID:        uuid.New().String(),
@@ -183,7 +186,7 @@ func (s *Scheduler) execute(t *backend.ScheduledTask) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
-	res, _ := executor.Run(ctx, cmd, func(chunk string) {
+	res, _ := executor.Run(ctx, cmd, t.WorkingDir, func(chunk string) {
 		s.hub.Broadcast(wsmsg.ChannelScheduled, map[string]any{
 			"scheduled_task_id": t.ID,
 			"execution_id":      exec.ID,

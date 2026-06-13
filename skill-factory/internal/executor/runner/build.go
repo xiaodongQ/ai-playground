@@ -5,19 +5,30 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
-// BuildCommand 根据类型构造命令列表，避免 shell 注入。
+// BuildCommand 根据类型构造命令列表。
 //
-// claude:   claude -p --output-format json [--model <m>] [--session-id <sid>] "<prompt>"
+// 返回的 cleanup 闭包用于释放命令创建过程中产生的资源（当前只有 shell
+// 类型会产生临时脚本文件）。非 shell 类型 cleanup 为 nil，调用方可
+// 无脑 defer 调一次。返回的 error 仅指构造错误，命令执行错误由 executor
+// 在 wait 时报。
 //
-//	输出为单次 JSON（含 num_turns / result / is_error 等元数据，便于 evaluator 判定真伪）
+// 命令形式：
 //
-// cbc:      cbc -p [--model <m>] "<prompt>"   （PATH 中无 cbc 时回落到 codebuddy）
-// shell:    sh -c "<prompt>"
-func BuildCommand(typ, model, sessionID, prompt string, opts ...func(*buildOpts)) ([]string, error) {
+//	claude:   claude -p --output-format json [--model <m>] [--session-id <sid>] "<prompt>"
+//	          输出为单次 JSON（含 num_turns / result / is_error 等元数据，便于 evaluator 判定真伪）
+//	cbc:      cbc -p [--model <m>] "<prompt>"   （PATH 中无 cbc 时回落到 codebuddy）
+//	shell:    sh <tmpfile.sh> / powershell -File <tmpfile.ps1>
+//
+// shell 类型不再用 `sh -c "<prompt>"` 形式 — 那样会让 prompt 中含的
+// `;` / `&` / `|` / `$()` 等被 shell 二次解析，等于 shell 注入。
+// 改用临时脚本文件（一次写入，文件名安全），执行解释器直接喂文件。
+func BuildCommand(typ, model, sessionID, prompt string, opts ...func(*buildOpts)) (cmd []string, cleanup func(), err error) {
 	slog.Debug("runner: BuildCommand",
 		slog.String("type", typ),
 		slog.String("model", model),
@@ -41,14 +52,14 @@ func BuildCommand(typ, model, sessionID, prompt string, opts ...func(*buildOpts)
 			finalPrompt = prompt + ActionReportSuffix
 		}
 		cmd = append(cmd, finalPrompt)
-		return cmd, nil
+		return cmd, nil, nil
 	case "cbc", "codebuddy":
 		bin := "cbc"
 		if _, err := exec.LookPath("cbc"); err != nil {
 			if _, err2 := exec.LookPath("codebuddy"); err2 == nil {
 				bin = "codebuddy"
 			} else {
-				return nil, errors.New("neither cbc nor codebuddy found in PATH")
+				return nil, nil, errors.New("neither cbc nor codebuddy found in PATH")
 			}
 		}
 		cmd := []string{bin, "-p"}
@@ -60,13 +71,53 @@ func BuildCommand(typ, model, sessionID, prompt string, opts ...func(*buildOpts)
 			finalPrompt = prompt + ActionReportSuffix
 		}
 		cmd = append(cmd, finalPrompt)
-		return cmd, nil
+		return cmd, nil, nil
 	case "shell":
-		// sh -c "<prompt>" 形式：单元素由调用方用 sh 包装
-		return []string{"sh", "-c", prompt}, nil
+		return shellRunCommand(prompt)
 	default:
-		return nil, fmt.Errorf("unknown command_type: %q", typ)
+		return nil, nil, fmt.Errorf("unknown command_type: %q", typ)
 	}
+}
+
+// shellRunCommand 把 prompt 写到临时文件并返回 sh/powershell 直接执行该文件的命令。
+// 返回的 cleanup 删除该临时文件，调用方应 defer cleanup()。
+func shellRunCommand(prompt string) ([]string, func(), error) {
+	var name, interp string
+	if runtime.GOOS == "windows" {
+		// .ps1 后缀让 PowerShell 走文件解析而不是 -Command 字符串解析。
+		name = "sf-shell-*.ps1"
+		interp = "powershell.exe"
+	} else {
+		name = "sf-shell-*.sh"
+		interp = "sh"
+	}
+	f, err := os.CreateTemp("", name)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create temp script: %w", err)
+	}
+	path := f.Name()
+	if _, err := f.WriteString(prompt); err != nil {
+		f.Close()
+		_ = os.Remove(path)
+		return nil, nil, fmt.Errorf("write temp script: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(path)
+		return nil, nil, fmt.Errorf("close temp script: %w", err)
+	}
+	var cmd []string
+	if runtime.GOOS == "windows" {
+		// -File 走文件路径，不会对 prompt 文本做命令行再解析。
+		cmd = []string{interp, "-NoProfile", "-NonInteractive", "-File", path}
+	} else {
+		cmd = []string{interp, path}
+	}
+	cleanup := func() {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			slog.Warn("runner: remove temp script", slog.String("path", path), slog.String("err", err.Error()))
+		}
+	}
+	return cmd, cleanup, nil
 }
 
 func CmdString(cmd []string) string { return strings.Join(cmd, " ") }

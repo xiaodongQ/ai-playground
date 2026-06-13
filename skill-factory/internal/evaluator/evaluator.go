@@ -128,13 +128,16 @@ func Evaluate(ctx context.Context, exec *backend.Execution, taskPrompt string, m
 		exec.ExitCode,
 	))
 
-	cmd, err := runner.BuildCommand("claude", model, "", prompt)
+	cmd, cleanup, err := runner.BuildCommand("claude", model, "", prompt)
 	if err != nil {
 		return nil, fmt.Errorf("build cmd: %w", err)
 	}
+	if cleanup != nil {
+		defer cleanup()
+	}
 	ctx2, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
-	res, runErr := executor.Run(ctx2, cmd, nil)
+	res, runErr := executor.Run(ctx2, cmd, "", nil)
 	if runErr != nil && res == nil {
 		return nil, fmt.Errorf("run: %w", runErr)
 	}

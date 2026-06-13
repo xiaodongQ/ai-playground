@@ -19,6 +19,7 @@ import (
 	"skill-factory/internal/executor"
 	"skill-factory/internal/executor/runner"
 	"skill-factory/internal/hub"
+	"skill-factory/internal/paths"
 	"skill-factory/internal/scheduler"
 	"skill-factory/internal/shortcuts"
 	taskpkg "skill-factory/internal/task"
@@ -473,10 +474,13 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Prompt = prompt
 
-	cmd, err := runner.BuildCommand(req.CommandType, req.Model, "", req.Prompt, runner.WithActionReport())
+	cmd, cleanup, err := runner.BuildCommand(req.CommandType, req.Model, "", req.Prompt, runner.WithActionReport())
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if cleanup != nil {
+		defer cleanup() // 注：当前 handleTaskRun 是同步写 response，cleanup 放到 goroutine 里更稳；先放这里
 	}
 
 	// 写 executions 行
@@ -515,7 +519,10 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 			delete(s.running, id)
 			s.mu.Unlock()
 		}()
-		res, runErr := executor.Run(ctx, cmd, func(chunk string) {
+		if cleanup != nil {
+			defer cleanup()
+		}
+		res, runErr := executor.Run(ctx, cmd, "", func(chunk string) {
 			s.hub.Broadcast(wsmsg.ChannelExec, map[string]any{
 				"execution_id": exec.ID,
 				"task_id":      id,
@@ -1233,10 +1240,7 @@ func errStr(err error) string {
 }
 
 func main() {
-	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" {
-		dbPath = "data/skill-factory.db"
-	}
+	dbPath := paths.ResolveDBPath()
 	if cwd, err := os.Getwd(); err == nil {
 		slog.Info("db path", slog.String("path", dbPath), slog.String("cwd", cwd))
 	} else {

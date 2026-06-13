@@ -1,14 +1,18 @@
 package runner
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestBuildCommandClaude(t *testing.T) {
-	got, err := BuildCommand("claude", "sonnet", "sess-1", "解析 slowlog")
+	got, cleanup, err := BuildCommand("claude", "sonnet", "sess-1", "解析 slowlog")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Errorf("cleanup should be nil for claude type")
 	}
 	want := []string{"claude", "-p", "--output-format", "json", "--model", "sonnet", "--session-id", "sess-1", "解析 slowlog"}
 	if len(got) != len(want) {
@@ -22,10 +26,13 @@ func TestBuildCommandClaude(t *testing.T) {
 }
 
 func TestBuildCommandCbc(t *testing.T) {
-	got, err := BuildCommand("cbc", "opus", "", "写一个 hello world")
+	got, cleanup, err := BuildCommand("cbc", "opus", "", "写一个 hello world")
 	if err != nil {
 		// PATH 中可能没有 cbc/codebuddy，跳过
 		t.Skip("cbc/codebuddy not in PATH:", err)
+	}
+	if cleanup != nil {
+		t.Errorf("cleanup should be nil for cbc type")
 	}
 	// 至少验证第一项是 cbc 或 codebuddy
 	if got[0] != "cbc" && got[0] != "codebuddy" {
@@ -37,26 +44,34 @@ func TestBuildCommandCbc(t *testing.T) {
 }
 
 func TestBuildCommandShell(t *testing.T) {
-	got, err := BuildCommand("shell", "", "", "echo hi")
+	got, cleanup, err := BuildCommand("shell", "", "", "echo hi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"sh", "-c", "echo hi"}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
+	if cleanup == nil {
+		t.Fatalf("cleanup should not be nil for shell type")
+	}
+	defer cleanup()
+	// 不再用 sh -c 形式 — 改用临时文件避免 shell 注入。
+	if runtime.GOOS == "windows" {
+		if got[0] != "powershell.exe" || got[1] != "-NoProfile" || got[2] != "-NonInteractive" || got[3] != "-File" {
+			t.Errorf("windows shell cmd shape: %v", got)
+		}
+	} else {
+		if got[0] != "sh" || got[1] == "-c" {
+			t.Errorf("unix shell cmd should not use -c: %v", got)
 		}
 	}
 }
 
 func TestBuildCommandUnknown(t *testing.T) {
-	if _, err := BuildCommand("nonsense", "", "", "x"); err == nil {
+	if _, _, err := BuildCommand("nonsense", "", "", "x"); err == nil {
 		t.Error("expected error for unknown type")
 	}
 }
 
 func TestBuildCommandClaudeWithActionReport(t *testing.T) {
-	got, err := BuildCommand("claude", "haiku", "", "用 osascript 通知我", WithActionReport())
+	got, _, err := BuildCommand("claude", "haiku", "", "用 osascript 通知我", WithActionReport())
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -74,12 +89,19 @@ func TestBuildCommandClaudeWithActionReport(t *testing.T) {
 }
 
 func TestBuildCommandShellNoActionReport(t *testing.T) {
-	got, err := BuildCommand("shell", "", "", "echo hi", WithActionReport())
+	got, cleanup, err := BuildCommand("shell", "", "", "echo hi", WithActionReport())
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	// shell 类型不加动作清单
-	if strings.Join(got, " ") != "sh -c echo hi" {
-		t.Errorf("shell cmd changed: %v", got)
+	defer cleanup()
+	// shell 类型不加动作清单；命令 argv 不直接含 echo hi（它在临时文件里）
+	if runtime.GOOS == "windows" {
+		if strings.Join(got, " ") == "sh -c echo hi" {
+			t.Errorf("shell cmd shouldn't be sh -c form: %v", got)
+		}
+	} else {
+		if strings.Join(got, " ") == "sh -c echo hi" {
+			t.Errorf("shell cmd shouldn't be sh -c form: %v", got)
+		}
 	}
 }
