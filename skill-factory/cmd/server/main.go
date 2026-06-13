@@ -71,6 +71,8 @@ func (s *APIServer) routes() {
 	mux.HandleFunc("GET /api/tasks", s.handleTasks)
 	mux.HandleFunc("POST /api/tasks", s.handleTaskCreate)
 	mux.HandleFunc("GET /api/tasks/{id}", s.handleTaskGet)
+	mux.HandleFunc("PUT /api/tasks/{id}", s.handleTaskUpdate)
+	mux.HandleFunc("PUT /api/tasks/{id}/status", s.handleTaskStatus)
 	mux.HandleFunc("PUT /api/tasks/{id}/status", s.handleTaskStatus)
 	mux.HandleFunc("POST /api/tasks/{id}/unclaim", s.handleTaskUnclaim)
 	mux.HandleFunc("POST /api/tasks/{id}/run", s.handleTaskRun)
@@ -188,6 +190,48 @@ func (s *APIServer) handleTaskCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		task.ExperienceIDs = expIDs
 	}
+	writeJSON(w, task)
+}
+
+func (s *APIServer) handleTaskUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Title        string   `json:"title"`
+		Description  string   `json:"description"`
+		ExperienceID string   `json:"experience_id"`
+		ExperienceIDs []string `json:"experience_ids"`
+		Resources    string   `json:"resources"`
+		Acceptance   string   `json:"acceptance"`
+		Module       string   `json:"module"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	task, err := s.db.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	task.Title = req.Title
+	task.Description = req.Description
+	task.ExperienceID = req.ExperienceID
+	task.Resources = req.Resources
+	task.Acceptance = req.Acceptance
+	if err := s.db.Update(task); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	// 多经验关联：experience_ids 优先；空时回退到旧的 experience_id 单值
+	expIDs := req.ExperienceIDs
+	if len(expIDs) == 0 && req.ExperienceID != "" {
+		expIDs = []string{req.ExperienceID}
+	}
+	if err := s.db.SetTaskExperiences(id, expIDs); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	task, _ = s.db.Get(id)
 	writeJSON(w, task)
 }
 
