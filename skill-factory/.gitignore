@@ -1,9 +1,0 @@
-# 运行时产物
-data/
-*.db-journal
-*.db
-bin/
-.codegraph
-# server 二进制（避免误忽略 cmd/server/static/ 等前端资源）
-cmd/server/server
-cmd/server/*.exe
