@@ -35,7 +35,7 @@ async function loadLinks() {
         ondragstart="widgetDragStart(event, 'web-links')" ondragover="widgetDragOver(event)" ondrop="widgetDrop(event, 'web-links', loadLinks)" ondragleave="widgetDragLeave(event)">
       <span class="drag-handle" title="拖动排序">⋮⋮</span>
       <div class="link-icon" onclick="window.open('${esc(l.url)}','_blank')">${icon}</div>
-      <div class="link-text" onclick="window.open('${esc(l.url)}','_blank')">
+      <div class="link-text" onclick="window.open('${esc(l.url)}','_blank')" title="${esc(l.url)}">
         <div class="link-name">${esc(l.name)}</div>
         <div class="link-url">${esc(l.url)}</div>
       </div>
@@ -52,14 +52,28 @@ function showLinkModal() {
   document.getElementById('link-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('link-name').focus(), 50);
 }
-function closeLinkModal() { document.getElementById('link-modal').classList.add('hidden'); }
+function closeLinkModal() {
+  document.getElementById('link-modal').classList.add('hidden');
+  document.getElementById('link-modal').dataset.editId = '';
+  const titleEl = document.querySelector('#link-modal h2');
+  if (titleEl) titleEl.textContent = '添加链接';
+}
 function submitLink() {
+  const id = document.getElementById('link-modal').dataset.editId;
   const name = document.getElementById('link-name').value.trim();
   const url = document.getElementById('link-url').value.trim();
   const icon = document.getElementById('link-icon').value.trim();
   if (!name || !url) { alert('名称和 URL 必填'); return; }
-  fetch('/api/web-links', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,url,icon_url:icon})})
-    .then(() => { closeLinkModal(); loadLinks(); });
+  if (id) {
+    // 编辑路径
+    fetch('/api/web-links/' + id, {method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, url, icon_url: icon})})
+      .then(() => { closeLinkModal(); loadLinks(); });
+  } else {
+    // 新建路径
+    fetch('/api/web-links', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,url,icon_url:icon})})
+      .then(() => { closeLinkModal(); loadLinks(); });
+  }
 }
 async function editLink(id) {
   const list = sortByOrder(await fetchJSON('/api/web-links'));
