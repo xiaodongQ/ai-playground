@@ -49,6 +49,9 @@ function showLinkModal() {
   document.getElementById('link-name').value = '';
   document.getElementById('link-url').value = '';
   document.getElementById('link-icon').value = '';
+  document.getElementById('link-modal').dataset.editId = '';  // 确保新建时清空
+  const titleEl = document.querySelector('#link-modal h2');
+  if (titleEl) titleEl.textContent = '添加链接';
   document.getElementById('link-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('link-name').focus(), 50);
 }
@@ -58,22 +61,20 @@ function closeLinkModal() {
   const titleEl = document.querySelector('#link-modal h2');
   if (titleEl) titleEl.textContent = '添加链接';
 }
-function submitLink() {
+async function submitLink() {
   const id = document.getElementById('link-modal').dataset.editId;
   const name = document.getElementById('link-name').value.trim();
   const url = document.getElementById('link-url').value.trim();
   const icon = document.getElementById('link-icon').value.trim();
   if (!name || !url) { alert('名称和 URL 必填'); return; }
   if (id) {
-    // 编辑路径
-    fetch('/api/web-links/' + id, {method:'PUT', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name, url, icon_url: icon})})
-      .then(() => { closeLinkModal(); loadLinks(); });
+    await fetch('/api/web-links/' + id, {method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, url, icon_url: icon})});
   } else {
-    // 新建路径
-    fetch('/api/web-links', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,url,icon_url:icon})})
-      .then(() => { closeLinkModal(); loadLinks(); });
+    await fetch('/api/web-links', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,url,icon_url:icon})});
   }
+  closeLinkModal();
+  loadLinks();
 }
 async function editLink(id) {
   const list = sortByOrder(await fetchJSON('/api/web-links'));
@@ -82,35 +83,10 @@ async function editLink(id) {
   document.getElementById('link-name').value = l.name || '';
   document.getElementById('link-url').value = l.url || '';
   document.getElementById('link-icon').value = l.icon_url || '';
-  // modal 标题 + 隐藏/显示删除按钮(复用 modal,改 title)
   const titleEl = document.querySelector('#link-modal h2');
   if (titleEl) titleEl.textContent = '编辑链接';
   document.getElementById('link-modal').dataset.editId = id;
   document.getElementById('link-modal').classList.remove('hidden');
-}
-function _linkModalUpdate() {
-  const id = document.getElementById('link-modal').dataset.editId;
-  if (!id) { closeLinkModal(); submitLink(); return; }  // 新建路径
-  const name = document.getElementById('link-name').value.trim();
-  const url = document.getElementById('link-url').value.trim();
-  const icon = document.getElementById('link-icon').value.trim();
-  if (!name || !url) { alert('名称和 URL 必填'); return; }
-  fetch('/api/web-links/' + id, {method:'PUT', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name, url, icon_url: icon})})
-    .then(() => { closeLinkModal(); document.getElementById('link-modal').dataset.editId = ''; loadLinks(); });
-}
-// 改 closeLinkModal 同步清 editId
-const _origCloseLink = closeLinkModal;
-function closeLinkModal() { _origCloseLink(); document.getElementById('link-modal').dataset.editId = ''; }
-function submitLink() {
-  const id = document.getElementById('link-modal').dataset.editId;
-  if (id) return _linkModalUpdate();
-  const name = document.getElementById('link-name').value.trim();
-  const url = document.getElementById('link-url').value.trim();
-  const icon = document.getElementById('link-icon').value.trim();
-  if (!name || !url) { alert('名称和 URL 必填'); return; }
-  fetch('/api/web-links', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,url,icon_url:icon})})
-    .then(() => { closeLinkModal(); loadLinks(); });
 }
 function deleteLink(id) {
   if (!confirm('删除该链接？')) return;
