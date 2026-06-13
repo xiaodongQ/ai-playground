@@ -121,6 +121,14 @@ func InitSchema(db *sql.DB) error {
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL
 	);
+	-- 多经验关联：task <-> experience 多对多（旧的 tasks.experience_id 单值仍保留，向后兼容）
+	CREATE TABLE IF NOT EXISTS task_experiences (
+		task_id TEXT NOT NULL,
+		experience_id TEXT NOT NULL,
+		created_at DATETIME,
+		PRIMARY KEY (task_id, experience_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_exp_exp ON task_experiences(experience_id);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		return err
@@ -129,7 +137,7 @@ func InitSchema(db *sql.DB) error {
 	if err := migrateTasksColumns(db); err != nil {
 		return err
 	}
-	if _, err := db.Exec(`PRAGMA user_version = 2`); err != nil {
+	if _, err := db.Exec(`PRAGMA user_version = 3`); err != nil {
 		return err
 	}
 	return nil
@@ -203,6 +211,9 @@ func (r *TaskRepo) Get(id string) (*Task, error) {
 	if claimedAt.Valid { t.ClaimedAt = &claimedAt.Time }
 	if archivedAt.Valid { t.ArchivedAt = &archivedAt.Time }
 	if err == sql.ErrNoRows { return nil, fmt.Errorf("task %s not found", id) }
+	if ids, err := r.ListExperienceIDsForTask(id); err == nil && len(ids) > 0 {
+		t.ExperienceIDs = ids
+	}
 	return &t, err
 }
 
@@ -214,10 +225,78 @@ func (r *TaskRepo) Delete(id string) error {
 	if _, err := r.db.Exec(`DELETE FROM evaluations WHERE task_id=?`, id); err != nil {
 		return fmt.Errorf("delete evaluations: %w", err)
 	}
+	if _, err := r.db.Exec(`DELETE FROM task_experiences WHERE task_id=?`, id); err != nil {
+		return fmt.Errorf("delete task_experiences: %w", err)
+	}
 	if _, err := r.db.Exec(`DELETE FROM tasks WHERE id=?`, id); err != nil {
 		return fmt.Errorf("delete task: %w", err)
 	}
 	return nil
+}
+
+// AttachExperiences 给 task 批量挂上 experiences（已存在则跳过）。
+func (r *TaskRepo) AttachExperiences(taskID string, expIDs []string) error {
+	if len(expIDs) == 0 { return nil }
+	tx, err := r.db.Begin()
+	if err != nil { return err }
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO task_experiences (task_id, experience_id, created_at) VALUES (?, ?, ?)`)
+	if err != nil { return err }
+	now := time.Now()
+	for _, id := range expIDs {
+		if id == "" { continue }
+		if _, err := stmt.Exec(taskID, id, now); err != nil {
+			stmt.Close()
+			return err
+		}
+	}
+	stmt.Close()
+	return tx.Commit()
+}
+
+// DetachExperience 解绑单个 experience。
+func (r *TaskRepo) DetachExperience(taskID, expID string) error {
+	_, err := r.db.Exec(`DELETE FROM task_experiences WHERE task_id=? AND experience_id=?`, taskID, expID)
+	return err
+}
+
+// SetTaskExperiences 全量替换 task 的 experience 列表（传空切片 == 解绑全部）。
+func (r *TaskRepo) SetTaskExperiences(taskID string, expIDs []string) error {
+	tx, err := r.db.Begin()
+	if err != nil { return err }
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM task_experiences WHERE task_id=?`, taskID); err != nil {
+		return err
+	}
+	if len(expIDs) > 0 {
+		stmt, err := tx.Prepare(`INSERT INTO task_experiences (task_id, experience_id, created_at) VALUES (?, ?, ?)`)
+		if err != nil { return err }
+		now := time.Now()
+		for _, id := range expIDs {
+			if id == "" { continue }
+			if _, err := stmt.Exec(taskID, id, now); err != nil {
+				stmt.Close()
+				return err
+			}
+		}
+		stmt.Close()
+	}
+	return tx.Commit()
+}
+
+// ListExperienceIDsForTask 返回 task 关联的 experience id 列表（按挂载顺序 = rowid 升序）。
+// rowid 比 created_at 更稳定（同秒插入时 created_at 截断到秒，rowid 仍单调）。
+func (r *TaskRepo) ListExperienceIDsForTask(taskID string) ([]string, error) {
+	rows, err := r.db.Query(`SELECT experience_id FROM task_experiences WHERE task_id=? ORDER BY rowid ASC`, taskID)
+	if err != nil { return nil, err }
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil { return nil, err }
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *TaskRepo) UpdateStatus(id, status, maintainer string) error {
@@ -257,7 +336,7 @@ func (r *TaskRepo) List(filter TaskFilter) ([]*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	// 先把 rows 全部读出来再 close（MaxOpenConns(1) 下，rows 未关闭时 N+1 再查会死锁）
 	var tasks []*Task
 	for rows.Next() {
 		var t Task
@@ -272,10 +351,18 @@ func (r *TaskRepo) List(filter TaskFilter) ([]*Task, error) {
 		t.RepoAddress = repoAddr.String
 		if claimedAt.Valid { t.ClaimedAt = &claimedAt.Time }
 		if archivedAt.Valid { t.ArchivedAt = &archivedAt.Time }
-		if err != nil { return nil, err }
+		if err != nil { rows.Close(); return nil, err }
 		tasks = append(tasks, &t)
 	}
-	return tasks, rows.Err()
+	if err := rows.Err(); err != nil { rows.Close(); return nil, err }
+	rows.Close()
+	// rows 已释放连接，再做 N+1 关联查询
+	for _, t := range tasks {
+		if ids, err := r.ListExperienceIDsForTask(t.ID); err == nil && len(ids) > 0 {
+			t.ExperienceIDs = ids
+		}
+	}
+	return tasks, nil
 }
 
 type ExperienceRepo struct{ db *sql.DB }
@@ -318,9 +405,12 @@ func (r *ExperienceRepo) Search(module string) ([]*Experience, error) {
 	return list, rows.Err()
 }
 
+// TestDB 返回 :memory: SQLite + 已 InitSchema 的 *sql.DB。
+// 强制 MaxOpenConns(1)：:memory: db 是 per-connection 的，pool 多连接下不同连接看到的 db 不同（数据看不到）。
 func TestDB() (*sql.DB, func(), error) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil { return nil, nil, err }
+	db.SetMaxOpenConns(1) // 强制单连接，避免 :memory: 多 db 实例
 	if err := InitSchema(db); err != nil { db.Close(); return nil, nil, err }
 	return db, func() { db.Close() }, nil
 }
@@ -487,6 +577,16 @@ func (r *WebLinkRepo) Delete(id string) error {
 	return err
 }
 
+// NextSortOrder 返回当前最大 sort_order + 1（无记录时返回 1），用于新增项追加到末尾。
+func (r *WebLinkRepo) NextSortOrder() int {
+	var maxSort sql.NullInt64
+	row := r.db.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) FROM web_links`)
+	if err := row.Scan(&maxSort); err != nil {
+		return 1
+	}
+	return int(maxSort.Int64) + 1
+}
+
 func (r *WebLinkRepo) List() ([]*WebLink, error) {
 	rows, err := r.db.Query(`SELECT id,name,url,icon_url,sort_order,created_at FROM web_links ORDER BY sort_order ASC, created_at DESC`)
 	if err != nil {
@@ -528,6 +628,16 @@ func (r *DirShortcutRepo) Update(d *DirShortcut) error {
 func (r *DirShortcutRepo) Delete(id string) error {
 	_, err := r.db.Exec(`DELETE FROM dir_shortcuts WHERE id=?`, id)
 	return err
+}
+
+// NextSortOrder 返回当前最大 sort_order + 1（无记录时返回 1）。
+func (r *DirShortcutRepo) NextSortOrder() int {
+	var maxSort sql.NullInt64
+	row := r.db.QueryRow(`SELECT COALESCE(MAX(sort_order), 0) FROM dir_shortcuts`)
+	if err := row.Scan(&maxSort); err != nil {
+		return 1
+	}
+	return int(maxSort.Int64) + 1
 }
 
 func (r *DirShortcutRepo) Touch(id string) error {

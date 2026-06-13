@@ -4,12 +4,10 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
-	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +20,7 @@ import (
 	"skill-factory/internal/hub"
 	"skill-factory/internal/scheduler"
 	"skill-factory/internal/shortcuts"
+	taskpkg "skill-factory/internal/task"
 	"skill-factory/internal/todo"
 	"skill-factory/internal/httplog"
 	"skill-factory/internal/wsmsg"
@@ -76,6 +75,7 @@ func (s *APIServer) routes() {
 	mux.HandleFunc("POST /api/tasks/{id}/run", s.handleTaskRun)
 	mux.HandleFunc("POST /api/tasks/{id}/cancel", s.handleTaskCancel)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.handleTaskDelete)
+	mux.HandleFunc("PUT /api/tasks/{id}/experiences", s.handleTaskSetExperiences)
 	mux.HandleFunc("GET /api/tasks/{id}/executions", s.handleTaskExecutions)
 	mux.HandleFunc("GET /api/executions", s.handleExecutionsRecent)
 	mux.HandleFunc("GET /api/executions/{id}", s.handleExecutionGet)
@@ -148,12 +148,13 @@ func (s *APIServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 
 func (s *APIServer) handleTaskCreate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Title        string `json:"title"`
-		Description string `json:"description"`
-		ExperienceID string `json:"experience_id"`
-		Resources   string `json:"resources"`
-		Acceptance  string `json:"acceptance"`
-		Module string `json:"module"`
+		Title        string   `json:"title"`
+		Description  string   `json:"description"`
+		ExperienceID string   `json:"experience_id"` // 旧字段（单值），保留向后兼容
+		ExperienceIDs []string `json:"experience_ids"` // 新字段：多经验关联
+		Resources    string   `json:"resources"`
+		Acceptance   string   `json:"acceptance"`
+		Module       string   `json:"module"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -174,6 +175,40 @@ func (s *APIServer) handleTaskCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// 多经验关联：experience_ids 优先；空时回退到旧的 experience_id 单值
+	expIDs := req.ExperienceIDs
+	if len(expIDs) == 0 && req.ExperienceID != "" {
+		expIDs = []string{req.ExperienceID}
+	}
+	if len(expIDs) > 0 {
+		if err := s.db.AttachExperiences(task.ID, expIDs); err != nil {
+			writeErr(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		task.ExperienceIDs = expIDs
+	}
+	writeJSON(w, task)
+}
+
+// handleTaskSetExperiences 替换 task 的整个经验列表。传空数组 = 解绑全部。
+func (s *APIServer) handleTaskSetExperiences(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		ExperienceIDs []string `json:"experience_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := s.db.Get(id); err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err := s.db.SetTaskExperiences(id, req.ExperienceIDs); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	task, _ := s.db.Get(id)
 	writeJSON(w, task)
 }
 
@@ -283,53 +318,32 @@ func (s *APIServer) handleStats(w http.ResponseWriter, r *http.Request) {
 
 // Task execution
 
-// BuildTaskPrompt 用 task + experience 信息构建 Rich AI prompt。
-// 注入: title / description / resources / acceptance / priority / experience 内容。
-// experience 为 nil 时跳过经验库段落。
-func BuildTaskPrompt(t *backend.Task, exp *backend.Experience) string {
-	var b strings.Builder
-	b.WriteString("# 任务背景\n")
-	b.WriteString(fmt.Sprintf("## 任务标题\n%s\n", t.Title))
-	if t.Description != "" {
-		b.WriteString(fmt.Sprintf("## 任务描述\n%s\n", t.Description))
+// BuildTaskPrompt 的实现已挪到 internal/task/prompt.go（便于跨包测试）。
+// 多经验支持：传 []*Experience 切片，每条经验单独一段（带 index）。
+
+// loadExperiencesForTask 按 task.ExperienceIDs 顺序加载所有 experience 内容。
+// 单个 exp 查不到时跳过（容错，不阻断运行），保持 prompt 仍然可用。
+func (s *APIServer) loadExperiencesForTask(t *backend.Task) []*backend.Experience {
+	if len(t.ExperienceIDs) == 0 {
+		return nil
 	}
-	if t.Priority > 0 {
-		b.WriteString(fmt.Sprintf("## 优先级\n%d（1 低 5 高）\n", t.Priority))
+	out := make([]*backend.Experience, 0, len(t.ExperienceIDs))
+	for _, id := range t.ExperienceIDs {
+		if id == "" { continue }
+		exp, err := s.expDB.Get(id)
+		if err != nil {
+			slog.Warn("loadExperiencesForTask: missing experience",
+				slog.String("task_id", t.ID),
+				slog.String("experience_id", id),
+			)
+			continue
+		}
+		out = append(out, exp)
 	}
-	if t.Resources != "" {
-		b.WriteString(fmt.Sprintf("## 资源/文档\n%s\n", t.Resources))
-	}
-	if t.Acceptance != "" {
-		b.WriteString(fmt.Sprintf("## 验收标准\n%s\n", t.Acceptance))
-	}
-	if exp != nil {
-		b.WriteString("# 相关经验库\n")
-		if exp.Module != "" {
-			b.WriteString(fmt.Sprintf("## 模块\n%s\n", exp.Module))
-		}
-		if exp.Scene != "" {
-			b.WriteString(fmt.Sprintf("## 场景\n%s\n", exp.Scene))
-		}
-		if exp.Keywords != "" {
-			b.WriteString(fmt.Sprintf("## 关键词\n%s\n", exp.Keywords))
-		}
-		if exp.ToolUsage != "" {
-			b.WriteString(fmt.Sprintf("## 工具用法\n%s\n", exp.ToolUsage))
-		}
-		if exp.LogSamples != "" {
-			b.WriteString(fmt.Sprintf("## 日志样例\n%s\n", exp.LogSamples))
-		}
-		if exp.CodeSnippets != "" {
-			b.WriteString(fmt.Sprintf("## 代码片段\n%s\n", exp.CodeSnippets))
-		}
-		if exp.LogPaths != "" {
-			b.WriteString(fmt.Sprintf("## 日志路径\n%s\n", exp.LogPaths))
-		}
-	}
-	b.WriteString("# 用户指令\n")
-	b.WriteString(t.Description)
-	return b.String()
+	return out
 }
+
+// handleTaskRun 立即执行一次任务。command_type 默认 "claude"（让 AI CLI 解释
 
 // handleTaskRun 立即执行一次任务。command_type 默认 "claude"（让 AI CLI 解释
 // 执行 prompt），可显式传 "shell" / "cbc" 走其他 runner。prompt 必传或取自
@@ -352,18 +366,14 @@ func (s *APIServer) handleTaskRun(w http.ResponseWriter, r *http.Request) {
 	if req.CommandType == "" {
 		req.CommandType = "claude"
 	}
-	// 构造 rich prompt: task 全字段 + experience 内容注入
+	// 构造 rich prompt: task 全字段 + 多经验内容注入
 	var prompt string
 	if req.Prompt != "" {
 		// 显式传了 prompt 就用显式的(保留原有行为)
 		prompt = req.Prompt
 	} else {
-		// 没用 body.prompt,自动从 task + experience 组装
-		var exp *backend.Experience
-		if task.ExperienceID != "" {
-			exp, _ = s.expDB.Get(task.ExperienceID)
-		}
-		prompt = BuildTaskPrompt(task, exp)
+		// 没用 body.prompt,自动从 task + 多 experience 组装
+		prompt = taskpkg.BuildTaskPrompt(task, s.loadExperiencesForTask(task)...)
 		if prompt == "" {
 			slog.Warn("task run rejected: empty prompt after BuildTaskPrompt",
 				slog.String("task_id", id),
@@ -547,15 +557,11 @@ func (s *APIServer) handleExecutionEvaluate(w http.ResponseWriter, r *http.Reque
 	if req.Model == "" {
 		req.Model = "sonnet"
 	}
-	// 找 task prompt：用 BuildTaskPrompt 注入完整 task + experience 信息
+	// 找 task prompt：用 BuildTaskPrompt 注入完整 task + 多 experience 信息
 	prompt := exec.Command
 	if exec.TaskID != "" {
 		if t, err := s.db.Get(exec.TaskID); err == nil {
-			var exp *backend.Experience
-			if t.ExperienceID != "" {
-				exp, _ = s.expDB.Get(t.ExperienceID)
-			}
-			prompt = BuildTaskPrompt(t, exp)
+			prompt = taskpkg.BuildTaskPrompt(t, s.loadExperiencesForTask(t)...)
 		}
 	}
 	// 异步执行（避免 HTTP 阻塞 30s+）
@@ -650,6 +656,10 @@ func (s *APIServer) handleWebLinkCreate(w http.ResponseWriter, r *http.Request) 
 		writeErr(w, http.StatusBadRequest, "name and url are required")
 		return
 	}
+	// 显式传 sort_order 用显式,否则追加到末尾(max+1)
+	if req.SortOrder == 0 {
+		req.SortOrder = s.linkDB.NextSortOrder()
+	}
 	link := &backend.WebLink{
 		ID:        uuid.New().String(),
 		Name:      req.Name,
@@ -721,6 +731,9 @@ func (s *APIServer) handleDirShortcutCreate(w http.ResponseWriter, r *http.Reque
 	if req.Name == "" || req.Path == "" {
 		writeErr(w, http.StatusBadRequest, "name and path are required")
 		return
+	}
+	if req.SortOrder == 0 {
+		req.SortOrder = s.dirDB.NextSortOrder()
 	}
 	d := &backend.DirShortcut{
 		ID:        uuid.New().String(),

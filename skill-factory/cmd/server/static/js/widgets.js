@@ -2,26 +2,45 @@
 // 链接：每行一条；目录：打开失败弹错误；待办：支持增删
 // 依赖 api.js (fetchJSON/esc)
 
+// 通用：按 sort_order 排序
+function sortByOrder(arr) { return [...arr].sort((a,b) => (a.sort_order||0) - (b.sort_order||0)); }
+
+// 通用：拖动重排 helper（PUT sort_order 批量更新）
+async function reorderAndSave(type, idsInNewOrder) {
+  // 并行 PUT 全部 sort_order
+  const promises = idsInNewOrder.map((id, idx) =>
+    fetch(`/api/${type}/${id}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({sort_order: idx + 1}),
+    })
+  );
+  await Promise.all(promises);
+}
+
 // ===== 链接（列表样式：每行一条） =====
 async function loadLinks() {
-  const list = await fetchJSON('/api/web-links');
+  const list = sortByOrder(await fetchJSON('/api/web-links'));
   const grid = document.getElementById('links-grid');
   if (!list || list.length === 0) {
     grid.innerHTML = '<div style="color:var(--text-secondary);font-size:12px;text-align:center;padding:20px 0">点击 + 添加你的第一个链接</div>';
     return;
   }
-  grid.innerHTML = list.map(l => {
+  grid.innerHTML = list.map((l, idx) => {
     const initial = (l.name || '?')[0].toUpperCase();
     const icon = l.icon_url
       ? `<img src="${esc(l.icon_url)}" onerror="this.outerHTML='${initial}'">`
       : initial;
-    return `<div class="link-row" onclick="window.open('${esc(l.url)}','_blank')" title="${esc(l.url)}">
-      <div class="link-icon">${icon}</div>
-      <div class="link-text">
+    return `<div class="link-row" draggable="true" data-id="${l.id}" data-idx="${idx}"
+        ondragstart="widgetDragStart(event, 'web-links')" ondragover="widgetDragOver(event)" ondrop="widgetDrop(event, 'web-links', loadLinks)" ondragleave="widgetDragLeave(event)">
+      <span class="drag-handle" title="拖动排序">⋮⋮</span>
+      <div class="link-icon" onclick="window.open('${esc(l.url)}','_blank')">${icon}</div>
+      <div class="link-text" onclick="window.open('${esc(l.url)}','_blank')">
         <div class="link-name">${esc(l.name)}</div>
         <div class="link-url">${esc(l.url)}</div>
       </div>
-      <div class="link-del" onclick="event.stopPropagation();deleteLink('${l.id}')">×</div>
+      <div class="link-edit" onclick="event.stopPropagation();editLink('${l.id}')" title="编辑">✎</div>
+      <div class="link-del" onclick="event.stopPropagation();deleteLink('${l.id}')" title="删除">×</div>
     </div>`;
   }).join('');
 }
@@ -42,6 +61,43 @@ function submitLink() {
   fetch('/api/web-links', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,url,icon_url:icon})})
     .then(() => { closeLinkModal(); loadLinks(); });
 }
+async function editLink(id) {
+  const list = sortByOrder(await fetchJSON('/api/web-links'));
+  const l = list.find(x => x.id === id);
+  if (!l) return;
+  document.getElementById('link-name').value = l.name || '';
+  document.getElementById('link-url').value = l.url || '';
+  document.getElementById('link-icon').value = l.icon_url || '';
+  // modal 标题 + 隐藏/显示删除按钮(复用 modal,改 title)
+  const titleEl = document.querySelector('#link-modal h2');
+  if (titleEl) titleEl.textContent = '编辑链接';
+  document.getElementById('link-modal').dataset.editId = id;
+  document.getElementById('link-modal').classList.remove('hidden');
+}
+function _linkModalUpdate() {
+  const id = document.getElementById('link-modal').dataset.editId;
+  if (!id) { closeLinkModal(); submitLink(); return; }  // 新建路径
+  const name = document.getElementById('link-name').value.trim();
+  const url = document.getElementById('link-url').value.trim();
+  const icon = document.getElementById('link-icon').value.trim();
+  if (!name || !url) { alert('名称和 URL 必填'); return; }
+  fetch('/api/web-links/' + id, {method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name, url, icon_url: icon})})
+    .then(() => { closeLinkModal(); document.getElementById('link-modal').dataset.editId = ''; loadLinks(); });
+}
+// 改 closeLinkModal 同步清 editId
+const _origCloseLink = closeLinkModal;
+function closeLinkModal() { _origCloseLink(); document.getElementById('link-modal').dataset.editId = ''; }
+function submitLink() {
+  const id = document.getElementById('link-modal').dataset.editId;
+  if (id) return _linkModalUpdate();
+  const name = document.getElementById('link-name').value.trim();
+  const url = document.getElementById('link-url').value.trim();
+  const icon = document.getElementById('link-icon').value.trim();
+  if (!name || !url) { alert('名称和 URL 必填'); return; }
+  fetch('/api/web-links', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,url,icon_url:icon})})
+    .then(() => { closeLinkModal(); loadLinks(); });
+}
 function deleteLink(id) {
   if (!confirm('删除该链接？')) return;
   fetch('/api/web-links/' + id, {method:'DELETE'}).then(() => loadLinks());
@@ -49,7 +105,7 @@ function deleteLink(id) {
 
 // ===== 目录 =====
 async function loadDirs() {
-  const list = await fetchJSON('/api/dir-shortcuts');
+  const list = sortByOrder(await fetchJSON('/api/dir-shortcuts'));
   const el = document.getElementById('dir-list');
   if (!list || list.length === 0) {
     el.innerHTML = `<div class="dir-item" onclick="showDirModal()" style="font-style:italic;color:var(--text-secondary)">
@@ -61,34 +117,57 @@ async function loadDirs() {
     </div>`;
     return;
   }
-  el.innerHTML = list.map(d =>
-    `<div class="dir-item" onclick="openDir('${d.id}')" title="${esc(d.path)}">
-      <span class="dir-icon">📁</span>
-      <span class="dir-text">
+  el.innerHTML = list.map((d, idx) =>
+    `<div class="dir-item" draggable="true" data-id="${d.id}" data-idx="${idx}"
+        ondragstart="widgetDragStart(event, 'dir-shortcuts')" ondragover="widgetDragOver(event)" ondrop="widgetDrop(event, 'dir-shortcuts', loadDirs)" ondragleave="widgetDragLeave(event)">
+      <span class="drag-handle" title="拖动排序">⋮⋮</span>
+      <span class="dir-icon" onclick="openDir('${d.id}')">📁</span>
+      <span class="dir-text" onclick="openDir('${d.id}')">
         <span class="dir-name">${esc(d.name)}</span>
-        <span class="dir-path">${esc(d.path)}</span>
+        <span class="dir-path" title="${esc(d.path)}">${esc(d.path)}</span>
       </span>
-      <span class="dir-del" onclick="event.stopPropagation();deleteDir('${d.id}')">×</span>
+      <span class="dir-edit" onclick="event.stopPropagation();editDir('${d.id}')" title="编辑">✎</span>
+      <span class="dir-del" onclick="event.stopPropagation();deleteDir('${d.id}')" title="删除">×</span>
     </div>`).join('');
 }
 function showDirModal() {
   document.getElementById('dir-name').value = '';
   document.getElementById('dir-path').value = '';
+  document.getElementById('dir-modal').dataset.editId = '';
   document.getElementById('dir-modal').classList.remove('hidden');
   setTimeout(() => document.getElementById('dir-name').focus(), 50);
 }
 function closeDirModal() { document.getElementById('dir-modal').classList.add('hidden'); }
+async function editDir(id) {
+  const list = sortByOrder(await fetchJSON('/api/dir-shortcuts'));
+  const d = list.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById('dir-name').value = d.name || '';
+  document.getElementById('dir-path').value = d.path || '';
+  document.getElementById('dir-modal').dataset.editId = id;
+  document.getElementById('dir-modal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('dir-name').focus(), 50);
+}
 function submitDir() {
+  const id = document.getElementById('dir-modal').dataset.editId;
   const name = document.getElementById('dir-name').value.trim();
   const path = document.getElementById('dir-path').value.trim();
   if (!name || !path) { alert('名称和路径必填'); return; }
-  fetch('/api/dir-shortcuts', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,path})})
-    .then(r => r.json().then(d => ({ok: r.ok, body: d})))
-    .then(({ok, body}) => {
-      if (!ok) { alert('添加失败：' + (body.error || '未知错误')); return; }
-      closeDirModal();
-      loadDirs();
-    });
+  if (id) {
+    // 更新
+    fetch('/api/dir-shortcuts/' + id, {method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({name, path})})
+      .then(() => { closeDirModal(); loadDirs(); });
+  } else {
+    // 新建
+    fetch('/api/dir-shortcuts', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name,path})})
+      .then(r => r.json().then(d => ({ok: r.ok, body: d})))
+      .then(({ok, body}) => {
+        if (!ok) { alert('添加失败：' + (body.error || '未知错误')); return; }
+        closeDirModal();
+        loadDirs();
+      });
+  }
 }
 async function openDir(id) {
   try {
@@ -98,7 +177,6 @@ async function openDir(id) {
       alert('打开失败：' + (body.error || r.statusText || '目录可能不存在或无权限'));
       return;
     }
-    // 成功（如果是 JSON 响应）— 不弹窗，静默成功
   } catch (e) {
     alert('打开失败：' + e.message);
   }
@@ -157,4 +235,47 @@ function submitTodoPath() {
   if (!path) { alert('路径必填'); return; }
   fetch('/api/todo/path', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path})})
     .then(() => { closeTodoPathModal(); loadTodo(); });
+}
+
+// ===== 通用拖动重排（HTML5 drag/drop） =====
+let _dragSrcId = null;          // 拖动源 id
+let _dragType = null;           // 'web-links' | 'dir-shortcuts' | 'todos'
+let _dragReloading = null;      // 拖动结束后调用的 reload 回调
+
+function widgetDragStart(e, type) {
+  _dragSrcId = e.currentTarget.dataset.id;
+  _dragType = type;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', _dragSrcId);
+  e.currentTarget.style.opacity = '0.4';
+}
+function widgetDragOver(e) {
+  if (!_dragSrcId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.style.borderTop = '2px solid var(--primary)';
+}
+function widgetDragLeave(e) {
+  e.currentTarget.style.borderTop = '';
+}
+async function widgetDrop(e, type, reloadFn) {
+  e.preventDefault();
+  e.currentTarget.style.borderTop = '';
+  const tgtId = e.currentTarget.dataset.id;
+  // 恢复 opacity
+  document.querySelectorAll(`[data-id][draggable="true"]`).forEach(el => el.style.opacity = '');
+  if (!_dragSrcId || _dragSrcId === tgtId) { _dragSrcId = null; return; }
+  // 重排
+  const container = e.currentTarget.parentElement;
+  const idsInNewOrder = Array.from(container.querySelectorAll('[data-id][draggable="true"]')).map(el => el.dataset.id);
+  // 把 src 移到 tgt 位置
+  const srcIdx = idsInNewOrder.indexOf(_dragSrcId);
+  const tgtIdx = idsInNewOrder.indexOf(tgtId);
+  if (srcIdx < 0 || tgtIdx < 0) { _dragSrcId = null; return; }
+  idsInNewOrder.splice(srcIdx, 1);
+  idsInNewOrder.splice(tgtIdx, 0, _dragSrcId);
+  // 持久化
+  await reorderAndSave(type, idsInNewOrder);
+  _dragSrcId = null;
+  if (reloadFn) reloadFn();
 }
