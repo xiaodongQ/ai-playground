@@ -2,10 +2,13 @@
 # skill-factory e2e 验证脚本（开发用，临时端口 + 临时 db,不影响默认）
 #
 # 用法：
-#   ./scripts/e2e.sh                  # 跑全部 demo case
+#   ./scripts/e2e.sh                  # 跑全部 demo case(临时端口 + 临时 db)
 #   ./scripts/e2e.sh basic            # 只跑 basic case(创建任务 + 跑 + 评估)
 #   ./scripts/e2e.sh delete           # 只跑 delete case
 #   ./scripts/e2e.sh eval             # 只跑 eval case
+#   ./scripts/e2e.sh fast             # 复用运行中的 server(不 build/不重启),适合日常开发
+#                                     # 配合: sh scripts/run.sh --restart  →  ./scripts/e2e.sh fast
+#                                     #      E2E_BASE_URL=http://x:9001 ./scripts/e2e.sh fast
 #   ./scripts/e2e.sh teardown         # 强清理(不跑 case,只清残留)
 #
 # 设计原则：
@@ -25,6 +28,10 @@ TMP_LOG="/tmp/sf-e2e-$$.log"
 TMP_PORT=$((19000 + RANDOM % 1000))   # 19000-19999 临时端口
 SCRIPT_CMD_TYPE="${SCRIPT_CMD_TYPE:-claude}"   # 可被环境变量覆盖
 SCRIPT_MODEL="${SCRIPT_MODEL:-haiku}"
+
+# BASE_URL: 默认连临时 server;fast 模式改成连已有 server(默认 :8901)
+BASE_URL="${BASE_URL:-localhost:$TMP_PORT}"
+USE_EXISTING="${USE_EXISTING:-0}"
 
 # === 颜色 ===
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -46,13 +53,23 @@ cleanup() {
 trap cleanup EXIT
 
 start_server() {
+  # fast 模式:BASE_URL 已指向运行中的 server(默认 :8901),不重启
+  if [ "$USE_EXISTING" = "1" ]; then
+    info "复用已有 server @ $BASE_URL(不 build/不起进程)"
+    if ! curl -s "${BASE_URL}/api/tasks" >/dev/null 2>&1; then
+      err "已有 server 不在 $BASE_URL,先跑: sh scripts/run.sh"
+      exit 1
+    fi
+    ok "复用 server $BASE_URL"
+    return
+  fi
   info "build + start server @ :$TMP_PORT (db=$TMP_DB)"
   ( cd "$ROOT" && go build -o "$TMP_BIN" ./cmd/server )
   DB_PATH="$TMP_DB" ADDR=":$TMP_PORT" nohup "$TMP_BIN" > "$TMP_LOG" 2>&1 &
   SERVER_PID=$!
   # 等 server 起来
   for i in 1 2 3 4 5 6 7 8 9 10; do
-    if curl -s "localhost:$TMP_PORT/api/tasks" >/dev/null 2>&1; then
+    if curl -s "${BASE_URL}/api/tasks" >/dev/null 2>&1; then
       ok "server up (pid=$SERVER_PID, port=$TMP_PORT)"
       return
     fi
@@ -78,14 +95,14 @@ case_basic() {
   info "[basic] 创建 task + 跑 shell + 查 list"
   local desc="e2e basic test $(date +%s)"
   local resp
-  resp=$(curl -s -X POST "localhost:$TMP_PORT/api/tasks" -H "Content-Type: application/json" \
+  resp=$(curl -s -X POST "${BASE_URL}/api/tasks" -H "Content-Type: application/json" \
     -d "{\"title\":\"e2e\",\"description\":\"$desc\"}")
   local tid=$(jget "$resp" "id")
   [ -n "$tid" ] || { err "创建 task 失败: $resp"; return 1; }
   ok "task created: $tid"
 
   local ex
-  ex=$(curl -s -X POST "localhost:$TMP_PORT/api/tasks/$tid/run" \
+  ex=$(curl -s -X POST "${BASE_URL}/api/tasks/$tid/run" \
     -H "Content-Type: application/json" \
     -d '{"command_type":"shell","prompt":"echo e2e-ok"}')
   local eid=$(jget "$ex" "execution_id")
@@ -95,7 +112,7 @@ case_basic() {
   # 等完成(shell echo 立即完成,等 2s)
   sleep 2
   local list
-  list=$(curl -s "localhost:$TMP_PORT/api/executions?limit=5")
+  list=$(curl -s "${BASE_URL}/api/executions?limit=5")
   local found
   found=$(echo "$list" | python3 -c "
 import json, sys
@@ -108,27 +125,27 @@ else:
     print('no')")
   [ "$found" = "yes" ] && ok "execution 完成,exit_code=0" || { err "execution 未完成"; return 1; }
   info "cleanup task $tid"
-  curl -s -X DELETE "localhost:$TMP_PORT/api/tasks/$tid" >/dev/null
+  curl -s -X DELETE "${BASE_URL}/api/tasks/$tid" >/dev/null
   ok "basic case ✅"
 }
 
 case_eval() {
   info "[eval] 跑任务 + 触发评估 + 查 evaluation_score 字段"
   local resp
-  resp=$(curl -s -X POST "localhost:$TMP_PORT/api/tasks" -H "Content-Type: application/json" \
+  resp=$(curl -s -X POST "${BASE_URL}/api/tasks" -H "Content-Type: application/json" \
     -d '{"title":"e2e-eval","description":"write hello world"}')
   local tid=$(jget "$resp" "id")
   [ -n "$tid" ] || { err "创建 task 失败: $resp"; return 1; }
 
   local ex
-  ex=$(curl -s -X POST "localhost:$TMP_PORT/api/tasks/$tid/run" \
+  ex=$(curl -s -X POST "${BASE_URL}/api/tasks/$tid/run" \
     -H "Content-Type: application/json" \
     -d "{\"command_type\":\"$SCRIPT_CMD_TYPE\",\"model\":\"$SCRIPT_MODEL\",\"prompt\":\"write hello world\"}")
   local eid=$(jget "$ex" "execution_id")
   ok "exec: $eid"
 
   # 触发评估
-  curl -s -X POST "localhost:$TMP_PORT/api/executions/$eid/evaluate" \
+  curl -s -X POST "${BASE_URL}/api/executions/$eid/evaluate" \
     -H "Content-Type: application/json" -d '{"model":"sonnet"}' >/dev/null
   info "等待评估完成(最多 60s)..."
 
@@ -137,7 +154,7 @@ case_eval() {
 
   # 查 list,看 evaluation_score 字段
   local list
-  list=$(curl -s "localhost:$TMP_PORT/api/executions?limit=1")
+  list=$(curl -s "${BASE_URL}/api/executions?limit=1")
   local score
   score=$(echo "$list" | python3 -c "
 import json, sys
@@ -149,32 +166,32 @@ print(e.get('evaluation_score', 'NONE'))")
   }
 
   info "cleanup task $tid"
-  curl -s -X DELETE "localhost:$TMP_PORT/api/tasks/$tid" >/dev/null
+  curl -s -X DELETE "${BASE_URL}/api/tasks/$tid" >/dev/null
   ok "eval case ✅"
 }
 
 case_delete() {
   info "[delete] 删 task + 关联 executions 一并清"
   local resp
-  resp=$(curl -s -X POST "localhost:$TMP_PORT/api/tasks" -H "Content-Type: application/json" \
+  resp=$(curl -s -X POST "${BASE_URL}/api/tasks" -H "Content-Type: application/json" \
     -d '{"title":"to-delete","description":"will be removed"}')
   local tid=$(jget "$resp" "id")
 
   # 跑一次让它有 exec
-  curl -s -X POST "localhost:$TMP_PORT/api/tasks/$tid/run" \
+  curl -s -X POST "${BASE_URL}/api/tasks/$tid/run" \
     -H "Content-Type: application/json" \
     -d '{"command_type":"shell","prompt":"echo x"}' >/dev/null
   sleep 1
 
   # 删
   local del
-  del=$(curl -s -X DELETE "localhost:$TMP_PORT/api/tasks/$tid")
+  del=$(curl -s -X DELETE "${BASE_URL}/api/tasks/$tid")
   local status=$(jget "$del" "status")
   [ "$status" = "deleted" ] && ok "delete 返回 deleted" || { err "delete 失败: $del"; return 1; }
 
   # 验证 GET 返 404
   local get
-  get=$(curl -s "localhost:$TMP_PORT/api/tasks/$tid")
+  get=$(curl -s "${BASE_URL}/api/tasks/$tid")
   echo "$get" | grep -q "not found" && ok "task 已清,GET 返 not found" || { err "task 还在: $get"; return 1; }
   ok "delete case ✅"
 }
@@ -182,40 +199,40 @@ case_delete() {
 case_toggle() {
   info "[toggle] 定时任务启停切换"
   local resp
-  resp=$(curl -s -X POST "localhost:$TMP_PORT/api/scheduled" -H "Content-Type: application/json" \
+  resp=$(curl -s -X POST "${BASE_URL}/api/scheduled" -H "Content-Type: application/json" \
     -d '{"name":"e2e-toggle","cron_expr":"@every 60s","command_type":"shell","prompt":"echo tick","enabled":true}')
   local sid=$(jget "$resp" "id")
 
   # toggle off
   local after
-  after=$(curl -s -X POST "localhost:$TMP_PORT/api/scheduled/$sid/toggle")
+  after=$(curl -s -X POST "${BASE_URL}/api/scheduled/$sid/toggle")
   local enabled=$(jget "$after" "enabled")
   [ "$enabled" = "False" ] && ok "toggle 1: enabled=False" || { err "toggle 失败: $after"; return 1; }
 
   # toggle on
-  after=$(curl -s -X POST "localhost:$TMP_PORT/api/scheduled/$sid/toggle")
+  after=$(curl -s -X POST "${BASE_URL}/api/scheduled/$sid/toggle")
   enabled=$(jget "$after" "enabled")
   [ "$enabled" = "True" ] && ok "toggle 2: enabled=True" || { err "toggle 失败: $after"; return 1; }
 
-  curl -s -X DELETE "localhost:$TMP_PORT/api/scheduled/$sid" >/dev/null
+  curl -s -X DELETE "${BASE_URL}/api/scheduled/$sid" >/dev/null
   ok "toggle case ✅"
 }
 
 case_prompt_inject() {
   info "[prompt-inject] 验证 BuildTaskPrompt 注入全字段"
   local resp
-  resp=$(curl -s -X POST "localhost:$TMP_PORT/api/tasks" -H "Content-Type: application/json" \
+  resp=$(curl -s -X POST "${BASE_URL}/api/tasks" -H "Content-Type: application/json" \
     -d '{"title":"k","description":"写一个求两数之和","priority":3,"resources":"https://leetcode.com","acceptance":"输入[2,3]→5"}')
   local tid=$(jget "$resp" "id")
 
   # 跑(不传 prompt,触发 BuildTaskPrompt 路径)
-  curl -s -X POST "localhost:$TMP_PORT/api/tasks/$tid/run" \
+  curl -s -X POST "${BASE_URL}/api/tasks/$tid/run" \
     -H "Content-Type: application/json" -d '{}' >/dev/null
   sleep 1
 
   # 查 executions.command 看 prompt 头
   local cmd
-  cmd=$(curl -s "localhost:$TMP_PORT/api/executions?limit=1" | python3 -c "
+  cmd=$(curl -s "${BASE_URL}/api/executions?limit=1" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
 print(d[0]['command'][:500] if d else '')")
@@ -223,7 +240,7 @@ print(d[0]['command'][:500] if d else '')")
   echo "$cmd" | grep -q "优先级" && ok "✓ 注入 '优先级' 段" || info "(无 priority 字段,跳过优先级检查)"
   echo "$cmd" | grep -q "写一个求两数之和" && ok "✓ 注入 description" || { err "✗ 缺 description"; return 1; }
 
-  curl -s -X DELETE "localhost:$TMP_PORT/api/tasks/$tid" >/dev/null
+  curl -s -X DELETE "${BASE_URL}/api/tasks/$tid" >/dev/null
   ok "prompt-inject case ✅"
 }
 
@@ -236,7 +253,19 @@ case_teardown() {
 
 # === 入口 ===
 TARGET="${1:-all}"
-start_server
+# fast 模式:复用已有 server,跳过起临时 server 步骤
+if [ "$TARGET" = "fast" ]; then
+  USE_EXISTING=1
+  BASE_URL="${E2E_BASE_URL:-localhost:8901}"
+  info "fast 模式:复用 server @ $BASE_URL(不 build/不起进程)"
+  if ! curl -s "${BASE_URL}/api/tasks" >/dev/null 2>&1; then
+    err "server 不在 $BASE_URL,先跑: sh scripts/run.sh --restart"
+    exit 1
+  fi
+  ok "复用 server $BASE_URL"
+else
+  start_server
+fi
 
 run_case() {
   info "=== $1 ==="
@@ -263,6 +292,14 @@ case "$TARGET" in
   toggle)  run_case case_toggle ;;
   eval)    run_case case_eval ;;
   prompt)  run_case case_prompt_inject ;;
+  fast)
+    # 已在入口前处理(start_server 跳过)。这里只跑 case。
+    run_case case_basic
+    run_case case_delete
+    run_case case_toggle
+    run_case case_prompt_inject
+    run_case case_eval
+    ;;
   teardown) case_teardown; exit 0 ;;
   *)
     err "未知 case: $TARGET"
