@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -85,7 +86,7 @@ func (s *APIServer) routes() {
 	mux.HandleFunc("POST /api/experiences", s.handleExpCreate)
 	mux.HandleFunc("GET /api/experiences/{id}", s.handleExpGet)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
-	mux.HandleFunc("GET /api/pty", handlePty)
+	mux.HandleFunc("GET /api/pty", s.handlePty)
 	mux.HandleFunc("GET /ws", s.handleWS)
 	// /static/* 用 embed.FS serve 拆分 CSS/JS 文件
 	mux.Handle("GET /static/", http.FileServer(http.FS(FS)))
@@ -1182,8 +1183,13 @@ func main() {
 	if addr == "" {
 		addr = ":8901"
 	}
+	// SO_REUSEADDR：服务重启时避免 "address already in use" 等 TIME_WAIT
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatal(err)
+	}
 	log.Printf("Skill Factory started at http://localhost%s", addr)
-	if err := http.ListenAndServe(addr, srv); err != nil {
+	if err := (&http.Server{Handler: srv}).Serve(ln); err != nil {
 		log.Fatal(err)
 	}
 }
