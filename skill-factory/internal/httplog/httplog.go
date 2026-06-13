@@ -11,8 +11,16 @@ import (
 )
 
 // Middleware 包装 next，记录每次请求的处理结果。
+// 对于需要 WebSocket 升级的路径（/api/pty, /ws），直接放行以避免
+// statusRecorder 包装导致 http.Hijacker 接口无法通过检查。
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// WebSocket 升级路径直接放行，不包装 statusRecorder
+		if r.URL.Path == "/api/pty" || r.URL.Path == "/ws" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		start := time.Now()
 		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)

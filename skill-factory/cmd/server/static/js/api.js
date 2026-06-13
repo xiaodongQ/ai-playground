@@ -146,3 +146,56 @@ function updateToggleLabel() {
   if (lbl) lbl.textContent = sb.classList.contains('collapsed') ? '' : '收起';
 }
 loadSidebar();
+
+// ===== 全局快速 tooltip：替代浏览器原生 title 慢延迟 =====
+let _fastTipEl = null;
+function ensureFastTip() {
+  if (_fastTipEl) return _fastTipEl;
+  _fastTipEl = document.createElement('div');
+  _fastTipEl.className = 'custom-tooltip';
+  document.body.appendChild(_fastTipEl);
+  return _fastTipEl;
+}
+function showFastTip(target) {
+  const text = target.getAttribute('title');
+  if (!text) return;
+  // 阻止浏览器原生 tooltip 弹(把 title 暂存,鼠标走时恢复)
+  if (target._origTitle === undefined) target._origTitle = text;
+  target.setAttribute('title', '');
+  const tip = ensureFastTip();
+  tip.innerHTML = `<span class="tt-line">${esc(text)}</span>`;
+  const rect = target.getBoundingClientRect();
+  tip.style.left = (rect.right + 8) + 'px';
+  tip.style.top = (rect.top + rect.height / 2) + 'px';
+  tip.classList.add('show');
+}
+function hideFastTip(target) {
+  if (_fastTipEl) _fastTipEl.classList.remove('show');
+  if (target && target._origTitle !== undefined) {
+    target.setAttribute('title', target._origTitle);
+  }
+}
+function bindFastTooltips() {
+  // 排除 sidebar collapsed 的 data-tooltip(那个有专门系统)
+  document.querySelectorAll('[title]').forEach(el => {
+    if (el.closest('.sidebar.collapsed [data-tooltip]')) return;
+    if (el._fastTipBound) return;
+    el._fastTipBound = true;
+    el.addEventListener('mouseenter', () => showFastTip(el));
+    el.addEventListener('mouseleave', () => hideFastTip(el));
+    el.addEventListener('focus', () => showFastTip(el));
+    el.addEventListener('blur', () => hideFastTip(el));
+  });
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bindFastTooltips);
+} else {
+  bindFastTooltips();
+}
+// 自动化 widget 重新渲染后也需要重绑
+const _origLoadLinks = window.loadLinks;
+const _origLoadDirs = window.loadDirs;
+const _origLoadTodo = window.loadTodo;
+
+// 重新渲染后自动 rebind 快速 tooltip
+new MutationObserver(() => bindFastTooltips()).observe(document.body, {childList: true, subtree: true});
