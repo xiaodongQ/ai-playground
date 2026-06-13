@@ -127,7 +127,7 @@ function renderTaskTable(list) {
       return `
       <tr>
         <td style="display:flex;align-items:center;gap:6px">
-          <span class="edit-icon" onclick="showTaskModal(t)" title="编辑" style="cursor:pointer;color:var(--text-secondary);font-size:14px">✏️</span>
+          <span class="edit-icon" onclick="editTask('${t.id}')" title="编辑" style="cursor:pointer;color:var(--text-secondary);font-size:14px">✏️</span>
           <div class="task-title-cell">
             <div class="title">${esc(t.title)}</div>
             ${t.description ? `<div class="desc">${esc(t.description)}</div>` : ''}
@@ -312,6 +312,12 @@ function viewTask(id) {
     renderTaskExpChips();
   }
   document.getElementById('task-modal').classList.remove('hidden');
+}
+
+async function editTask(id) {
+  const t = tasks.find(t => t.id === id);
+  if (!t) { await loadTasks(); showTaskModal(tasks.find(x => x.id === id)); return; }
+  showTaskModal(t);
 }
 
 function showTaskModal(task) {
