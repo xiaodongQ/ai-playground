@@ -19,6 +19,8 @@ type Task struct {
 	Status       string     `json:"status"`
 	Priority     int        `json:"priority,omitempty"`
 	ExperienceID string     `json:"experience_id,omitempty"`
+	// 多经验关联：通过 task_experiences 表加载，列表/详情接口填充。空切片 == nil != 没设置
+	ExperienceIDs []string `json:"experience_ids,omitempty"`
 	Resources    string     `json:"resources,omitempty"`
 	Acceptance   string     `json:"acceptance,omitempty"`
 	Version      string     `json:"version"`
