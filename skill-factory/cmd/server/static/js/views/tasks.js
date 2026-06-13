@@ -315,9 +315,12 @@ function viewTask(id) {
 }
 
 async function editTask(id) {
-  const t = tasks.find(t => t.id === id);
-  if (!t) { await loadTasks(); showTaskModal(tasks.find(x => x.id === id)); return; }
-  showTaskModal(t);
+  let t = tasks.find(x => x.id === id);
+  if (!t) {
+    await loadTasks();
+    t = tasks.find(x => x.id === id);
+  }
+  if (t) showTaskModal(t);
 }
 
 function showTaskModal(task) {
