@@ -316,15 +316,15 @@ function viewTask(id) {
 
 function showTaskModal(task) {
   document.getElementById('task-modal-title').textContent = task ? '编辑任务' : '新建任务';
-  document.getElementById('task-id').value = '';
-  document.getElementById('task-title').value = '';
+  document.getElementById('task-id').value = task ? task.id : '';
+  document.getElementById('task-title').value = task ? task.title : '';
   document.getElementById('task-title').readOnly = false;
-  document.getElementById('task-desc').value = '';
+  document.getElementById('task-desc').value = task ? (task.description || '') : '';
   document.getElementById('task-desc').readOnly = false;
-  document.getElementById('task-module').value = '';
+  document.getElementById('task-module').value = task ? (task.module || '') : '';
   document.getElementById('task-module').readOnly = false;
-  document.getElementById('task-resources').value = '';
-  document.getElementById('task-acceptance').value = '';
+  document.getElementById('task-resources').value = task ? (task.resources || '') : '';
+  document.getElementById('task-acceptance').value = task ? (task.acceptance || '') : '';
   document.getElementById('task-acceptance').readOnly = false;
   document.getElementById('task-submit-btn').classList.remove('hidden');
   // 经验库：编辑模式从 task.experience_id 解析
