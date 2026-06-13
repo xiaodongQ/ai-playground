@@ -85,6 +85,8 @@ func (s *APIServer) routes() {
 	mux.HandleFunc("GET /api/executions/{id}/evaluations", s.handleExecutionEvaluations)
 	mux.HandleFunc("GET /api/experiences", s.handleExperiences)
 	mux.HandleFunc("POST /api/experiences", s.handleExpCreate)
+		mux.HandleFunc("PUT /api/experiences/{id}", s.handleExpUpdate)
+		mux.HandleFunc("DELETE /api/experiences/{id}", s.handleExpDelete)
 	mux.HandleFunc("GET /api/experiences/{id}", s.handleExpGet)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/pty", s.handlePty)
@@ -332,6 +334,48 @@ func (s *APIServer) handleExpGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, exp)
+}
+
+func (s *APIServer) handleExpUpdate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Module       string `json:"module"`
+		Keywords     string `json:"keywords"`
+		LogPaths     string `json:"log_paths"`
+		ToolUsage   string `json:"tool_usage"`
+		Scene       string `json:"scene"`
+		LogSamples  string `json:"log_samples"`
+		CodeSnippets string `json:"code_snippets"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	exp, err := s.expDB.Get(id)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	exp.Keywords = req.Keywords
+	exp.LogPaths = req.LogPaths
+	exp.ToolUsage = req.ToolUsage
+	exp.Scene = req.Scene
+	exp.LogSamples = req.LogSamples
+	exp.CodeSnippets = req.CodeSnippets
+	if err := s.expDB.Update(exp); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, exp)
+}
+
+func (s *APIServer) handleExpDelete(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.expDB.Delete(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, map[string]string{"status": "deleted"})
 }
 
 // Stats

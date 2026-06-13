@@ -412,6 +412,17 @@ func (r *ExperienceRepo) Search(module string) ([]*Experience, error) {
 	return list, rows.Err()
 }
 
+func (r *ExperienceRepo) Update(e *Experience) error {
+	q := `UPDATE experiences SET keywords=?, log_paths=?, tool_usage=?, scene=?, log_samples=?, code_snippets=?, updated_at=? WHERE id=?`
+	_, err := r.db.Exec(q, e.Keywords, e.LogPaths, e.ToolUsage, e.Scene, e.LogSamples, e.CodeSnippets, time.Now(), e.ID)
+	return err
+}
+
+func (r *ExperienceRepo) Delete(id string) error {
+	_, err := r.db.Exec(`DELETE FROM experiences WHERE id=?`, id)
+	return err
+}
+
 // TestDB 返回 :memory: SQLite + 已 InitSchema 的 *sql.DB。
 // 强制 MaxOpenConns(1)：:memory: db 是 per-connection 的，pool 多连接下不同连接看到的 db 不同（数据看不到）。
 func TestDB() (*sql.DB, func(), error) {
