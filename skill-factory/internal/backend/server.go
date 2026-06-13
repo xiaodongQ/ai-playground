@@ -10,6 +10,8 @@ func OpenDB(path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 强制单连接，避免并发写导致 SQLITE_BUSY
+	db.SetMaxOpenConns(1)
 	// foreign_keys 必须每次连接都设（连接级）
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		log.Printf("PRAGMA foreign_keys: %v", err)
