@@ -110,7 +110,7 @@ async function loadDirs() {
   el.innerHTML = list.map((d, idx) =>
     `<div class="dir-item" draggable="true" data-id="${d.id}" data-idx="${idx}"
         ondragstart="widgetDragStart(event, 'dir-shortcuts')" ondragover="widgetDragOver(event)" ondrop="widgetDrop(event, 'dir-shortcuts', loadDirs)" ondragleave="widgetDragLeave(event)">
-      <span class="drag-handle" title="拖动排序">⋮⋮</span>
+      <span class="drag-handle" title="拖动排序"></span>
       <span class="dir-icon" onclick="openDir('${d.id}')">📁</span>
       <span class="dir-text" onclick="openDir('${d.id}')">
         <span class="dir-name">${esc(d.name)}</span>

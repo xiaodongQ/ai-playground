@@ -294,14 +294,16 @@ tr:last-child td { border-bottom: none; }
 }
 .dir-item:hover { color: var(--text-primary); background: var(--hover); }
 .dir-item .dir-icon { font-size: 14px; flex-shrink: 0; }
-.dir-item .dir-text { flex: 1; min-width: 0; display: flex; flex-direction: row; align-items: baseline; gap: 6px; }
-.dir-item .dir-name { font-size: 13px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dir-item .dir-path { font-size: 10px; color: var(--text-secondary); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 2; }
+.dir-item .dir-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dir-item .dir-name { font-size: 13px; font-weight: 500; color: var(--text-primary); word-break: break-word; }
+.dir-item .dir-path { font-size: 10px; color: var(--text-secondary); font-family: monospace; word-break: break-all; opacity: 0.7; }
 .dir-item:hover .dir-path { opacity: 1; }
 .dir-item .dir-edit { cursor: pointer; padding: 0 2px; opacity: 0; font-size: 12px; align-self: center; }
 .dir-item:hover .dir-edit { opacity: 1; }
 .dir-item .dir-del { color: var(--danger); cursor: pointer; padding: 0 2px; opacity: 0; font-size: 12px; align-self: center; }
 .dir-item:hover .dir-del { opacity: 1; }
+.drag-handle { flex-shrink: 0; width: 10px; height: 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; cursor: grab; opacity: 0.4; }
+.drag-handle::before, .drag-handle::after { content: ''; width: 3px; height: 3px; border-radius: 50%; background: var(--text-secondary); display: block; }
 .sidebar.collapsed .dir-section { display: none; }
 
 /* ===== 杂项 ===== */
