@@ -298,6 +298,8 @@ tr:last-child td { border-bottom: none; }
 .dir-item .dir-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dir-item .dir-path { font-size: 10px; color: var(--text-secondary); font-family: monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0.7; }
 .dir-item:hover .dir-path { opacity: 1; }
+.dir-item .dir-edit { cursor: pointer; padding: 0 2px; opacity: 0; font-size: 12px; align-self: center; }
+.dir-item:hover .dir-edit { opacity: 1; }
 .dir-item .dir-del { color: var(--danger); cursor: pointer; padding: 0 2px; opacity: 0; font-size: 12px; align-self: center; }
 .dir-item:hover .dir-del { opacity: 1; }
 .sidebar.collapsed .dir-section { display: none; }
@@ -368,6 +370,8 @@ tr:last-child td { border-bottom: none; }
 .link-row .link-text { flex: 1; min-width: 0; }
 .link-row .link-name { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .link-row .link-url { display: none; }  /* 窄列下隐藏 URL，只显名 */
+.link-row .link-edit { cursor: pointer; padding: 0 2px; opacity: 0; font-size: 12px; }
+.link-row:hover .link-edit { opacity: 1; }
 .link-row .link-del { color: var(--danger); cursor: pointer; padding: 0 2px; opacity: 0; font-size: 12px; }
 .link-row:hover .link-del { opacity: 1; }
 
