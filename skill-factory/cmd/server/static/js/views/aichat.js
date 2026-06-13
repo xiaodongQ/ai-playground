@@ -5,6 +5,20 @@ let term;
 let ws;
 let termReady = false;
 
+// onCliChange 保存用户选择的 CLI 到后端（下次连接时生效）
+async function onCliChange(value) {
+  const disp = document.getElementById('cli-display');
+  if (disp) disp.textContent = value;
+  await fetchJSON('/api/settings/aichat_default_cli', {
+    method: 'PUT',
+    body: JSON.stringify({ value }),
+  });
+  // 提示用户需要刷新终端才能生效
+  if (termReady) {
+    term.writeln('\r\n\x1b[33m[skill-factory] CLI 已切换为 ' + value + '，刷新页面后生效\x1b[0m\r\n');
+  }
+}
+
 function initTerminal() {
   if (term) return;
   term = new Terminal({
@@ -33,4 +47,23 @@ function initTerminal() {
       ws.send('resize,' + term.cols + ',' + term.rows);
     }
   });
+
+  // 在终端初始化后加载 CLI 设置（确保下拉框值先恢复）
+  if (typeof loadCliSetting === 'function') loadCliSetting();
+}
+
+// 加载保存的 CLI 选择（页面加载时恢复下拉框值）
+async function loadCliSetting() {
+  const sel = document.getElementById('cli-selector');
+  const disp = document.getElementById('cli-display');
+  if (!sel) return;
+  try {
+    const settings = await fetchJSON('/api/settings');
+    if (settings?.aichat_default_cli) {
+      sel.value = settings.aichat_default_cli;
+      if (disp) disp.textContent = settings.aichat_default_cli;
+    }
+  } catch(e) {
+    console.error('[loadCliSetting] error:', e);
+  }
 }
